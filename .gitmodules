@@ -1,0 +1,3 @@
+[submodule "polyglot-debt"]
+	path = fixtures/polyglot-debt
+	url = ./fixtures/polyglot-debt

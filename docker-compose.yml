@@ -1,0 +1,23 @@
+services:
+  engine:
+    build: ./engine
+    ports:
+      - "8000:8000"
+    environment:
+      AETHER_DATA_DIR: /data
+      AETHER_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      - ./:/workspace
+      - aether-data:/data
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_AETHER_API: http://localhost:8000
+    depends_on:
+      - engine
+
+volumes:
+  aether-data:

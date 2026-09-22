@@ -1,0 +1,9 @@
+{
+  "unbounded_list": { "compute": 4.0, "storage": 0.4, "egress": 8.0 },
+  "chatty_rpc": { "compute": 6.0, "storage": 0.1, "egress": 2.5 },
+  "dual_write": { "compute": 2.0, "storage": 3.5, "egress": 0.5 },
+  "missing_index": { "compute": 7.0, "storage": 0.2, "egress": 0.2 },
+  "schema_leak": { "compute": 1.5, "storage": 1.0, "egress": 3.0 },
+  "god_module": { "compute": 1.2, "storage": 0.1, "egress": 0.1 },
+  "cyclic_dep": { "compute": 1.8, "storage": 0.1, "egress": 0.2 }
+}
