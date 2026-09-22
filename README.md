@@ -10,7 +10,7 @@
 [![Next.js](https://img.shields.io/badge/Dashboard-Next.js-000000.svg?logo=next.js)](web)
 [![Python](https://img.shields.io/badge/Languages-Python%20%2B%20TypeScript-3776AB.svg)](engine/aether/ir)
 
-[Why](#why-aether) · [Weather](#how-to-read-the-weather) · [Showcase](#showcase) · [Quick start](#quick-start) · [API](#engine-api)
+[Why](#why-aether) · [Weather](#how-to-read-the-weather) · [Showcase](#showcase) · [SDK](#python-sdk) · [Quick start](#quick-start) · [API](#engine-api)
 
 </div>
 
@@ -135,6 +135,42 @@ Point Aether at a local path or a public `https` / `git` URL on GitHub, GitLab, 
 
 Unresolved cross-service edges stay fog. Aether does not invent certainty.
 
+## Python SDK
+
+```bash
+pip install -e ./sdk
+```
+
+```python
+from aether_sdk import Aether
+
+with Aether("http://127.0.0.1:8000") as aether:
+    ingest = aether.ingest(
+        url="https://github.com/expressjs/express",
+        on_progress=lambda pct, stage: print(f"{pct}% {stage}"),
+    )
+    forecast = aether.forecast(ingest.universe_id)
+
+    for cell in forecast.hottest(5, months=8):
+        print(f"{cell.label:40} {cell.band:14} P {cell.pressure:.2f}")
+
+    for ghost in forecast.ghosts:
+        print(ghost.verdict, ghost.title, ghost.note)
+```
+
+`ingest()` starts a job and waits. Pass `wait=False` to get a `job_id` and poll yourself. `ingest_now()` hits `POST /v1/universes` on the request thread — fine for small repos.
+
+| Method | What it returns |
+| --- | --- |
+| `ingest(path=…, url=…)` | `IngestResult` (`universe_id`, license, snapshots) |
+| `forecast(universe_id)` | `Forecast` — timeline, ghosts, costs, butterflies |
+| `forecast.hottest(n, months=8)` | Highest-pressure cells at that horizon |
+| `forecast.frame(8).by_band()` | Cells grouped calm / watch / high-pressure |
+| `forecast.storms(8)` | Predicted collisions |
+| `graph(universe_id)` | IR slice |
+| `attach_changeset(universe_id, …)` | Apply a PR / intent and re-forecast |
+| `AsyncAether` | Same API, `async` / `await` |
+
 ## Quick start
 
 ```bash
@@ -207,6 +243,7 @@ The dashboard speaks one payload: `ForecastBundle`.
 ```
 Aether/
   engine/     Physics engine — IR, ingest, parsers, forecast
+  sdk/        Python client (`aether_sdk`)
   web/        Weather dashboard
   fixtures/   polyglot-debt demo (FastAPI + TypeScript)
   datasets/   Evolution records and cost drivers

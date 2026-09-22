@@ -1,0 +1,20 @@
+{
+  "id": "planted-schema",
+  "universe_id": "",
+  "label": "planted-schema",
+  "summary": "Add orders.status and orders.metadata — looks harmless today.",
+  "touched_paths": ["backend/models.py", "frontend/lib/api.ts"],
+  "mutations": [
+    {
+      "op": "add",
+      "node": {
+        "id": "schema-orders-metadata",
+        "kind": "schema",
+        "lang": "python",
+        "path": "backend/models.py",
+        "export_name": "orders",
+        "extra": { "missing_index": true, "added_columns": ["status", "metadata"] }
+      }
+    }
+  ]
+}
