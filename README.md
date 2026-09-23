@@ -138,7 +138,8 @@ Unresolved cross-service edges stay fog. Aether does not invent certainty.
 ## Python SDK
 
 ```bash
-pip install -e ./sdk
+pip install kaether
+# or from this repo: pip install -e ./sdk
 ```
 
 ```python

@@ -18,9 +18,10 @@ def build_universe(
     req: IngestRequest,
     db: AetherDB,
     on_progress: ProgressFn | None = None,
+    data_dir: Path | None = None,
 ) -> tuple[Universe, list[str]]:
     report = on_progress or (lambda _pct, _stage: None)
-    ingested = ingest_repo(req, on_progress=report)
+    ingested = ingest_repo(req, data_dir=data_dir, on_progress=report)
     universe_id = stable_id("universe", str(ingested.root))
     snapshots = []
     total = max(len(ingested.samples), 1)
@@ -29,7 +30,6 @@ def build_universe(
         short = sample.sha[:8] if sample.sha != "WORKING_TREE" else "working tree"
         report(pct, f"Parsing snapshot {i + 1}/{total} ({short})")
         snapshots.append(parse_snapshot(ingested.root, sample))
-    report(78, "Writing universe")
     universe = Universe(
         id=universe_id,
         repo_path=str(ingested.root),
@@ -37,6 +37,7 @@ def build_universe(
         snapshots=snapshots,
         velocity_commits_per_week=ingested.velocity,
     )
+    report(78, "Writing universe")
     db.upsert_universe(universe)
 
     records = []
@@ -51,15 +52,16 @@ def build_universe(
         records.append(rec)
 
     changeset = _maybe_changeset(ingested.root, universe_id, req.pr_ref, snapshots[-1] if snapshots else None)
+    report(88, "Saving changeset")
     if changeset:
         db.upsert_changeset(changeset)
 
-    report(90, "Running physics forecast")
     bundle = build_forecast(
         universe,
         extra_warnings=ingested.warnings,
         changeset=changeset,
     )
+    report(90, "Running physics forecast")
     db.upsert_forecast(bundle)
     report(100, "Forecast ready")
     return universe, ingested.warnings

@@ -20,10 +20,8 @@ def test_sample_working_tree(tmp_path: Path):
     assert samples[0].sha == "WORKING_TREE"
 
 
-def test_adapters_are_stubs():
-    with pytest.raises(NotImplementedError):
-        GhArchiveAdapter().fetch_velocity("org/repo")
-    with pytest.raises(NotImplementedError):
-        SoftwareHeritageAdapter().fetch_history("https://github.com/org/repo")
+def test_adapters_document_legal_queries():
     assert "PushEvent" in GhArchiveAdapter.EXAMPLE_QUERY
     assert "swh" in SoftwareHeritageAdapter.EXAMPLE_QUERY.lower()
+    with pytest.raises(FileNotFoundError):
+        GhArchiveAdapter(Path("/no/such/gharchive")).fetch_velocity("org/repo")

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
-from aether.ir.models import GhostResult, NodeKind, Snapshot
-from aether.physics.metrics import node_metrics
+from aether.gates.guardloop import LoopOutcome, ScrubOutcome
+from aether.gates.tracelens import GhostTracer
+from aether.ir.models import Edge, EdgeKind, GhostResult, Node, NodeKind, Snapshot
+from aether.physics.metrics import _cycles, node_metrics, snapshot_graph
 
 
 @dataclass(frozen=True)
@@ -26,8 +29,24 @@ CATALOG: list[GhostIntent] = [
 ]
 
 
-class GhostRunner:
-    """Seam for later real agents. Phase 1 is a heuristic planner."""
+class GhostRunner(Protocol):
+    name: str
+
+    def run(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult: ...
+
+
+class GhostGate(Protocol):
+    def open(self, name: str, budget: int) -> str: ...
+
+    def scrub(self, session_id: str, text: str) -> ScrubOutcome: ...
+
+    def check(self, session_id: str, context: str, action: str) -> LoopOutcome: ...
+
+
+class HeuristicGhostRunner:
+    """Rank attach points by mass. Default Ghost Lab planner."""
+
+    name = "heuristic"
 
     def run(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult:
         cells = {c.node_id: c for c in node_metrics(snapshot)}
@@ -77,6 +96,158 @@ class GhostRunner:
         )
 
 
-def run_ghost_lab(snapshot: Snapshot) -> list[GhostResult]:
-    runner = GhostRunner()
-    return [runner.run(snapshot, intent) for intent in CATALOG]
+class AgentGhostRunner:
+    """Attach each catalog intent as a shadow IR node. Does not write the checkout.
+
+    When a gate is attached, the catalog shares one GuardLoop session: a loop budget,
+    a secret scrub, and a loop check. An optional tracer records that same session
+    in TraceLens. The default lab does not use a gate or a tracer.
+    """
+
+    name = "agent"
+
+    def __init__(
+        self,
+        gate: GhostGate | None = None,
+        budget: int = 50,
+        session_name: str = "aether-ghost-lab",
+        tracer: GhostTracer | None = None,
+    ):
+        if budget < 1 or budget > 500:
+            raise ValueError("ghost session budget must be between 1 and 500")
+        self.gate = gate
+        self.budget = budget
+        self.session_name = session_name
+        self.tracer = tracer
+        self.session_id = ""
+        self.trace_id = ""
+        self._halted = False
+        self._halt_reason = ""
+
+    def run(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult:
+        result = self._attach(snapshot, intent)
+        if self.gate is not None:
+            result = self._guard(result, intent)
+        if self.tracer is None:
+            return result
+        return self._trace(result)
+
+    def _attach(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult:
+        before = (len(snapshot.nodes), len(snapshot.edges))
+        target = _attach_target(snapshot, intent)
+        ghost_id = f"ghost:{intent.intent}"
+        shadow = snapshot.model_copy(deep=True)
+        shadow.nodes.append(
+            Node(
+                id=ghost_id,
+                kind=NodeKind.MODULE,
+                lang="python",
+                path=f"ghost/{intent.intent}.py",
+                export_name=intent.intent,
+                loc=40,
+                complexity=4,
+            )
+        )
+        if target is not None:
+            shadow.edges.append(Edge(src=target.id, dst=ghost_id, kind=EdgeKind.IMPORT))
+        _, cycles_before = _cycles(snapshot_graph(snapshot))
+        _, cycles_after = _cycles(snapshot_graph(shadow))
+        new_cycles = max(0, cycles_after - cycles_before)
+        pressure = 0.0
+        if target is not None:
+            cells = {cell.node_id: cell for cell in node_metrics(snapshot)}
+            found = cells.get(target.id)
+            pressure = found.pressure if found else 0.0
+        files = [f"ghost/{intent.intent}.py"]
+        if target is not None and target.path:
+            files.append(target.path)
+        hot = pressure >= 1.2
+        hits = new_cycles + int(hot)
+        score = max(0.05, 1.0 - hits * 0.25)
+        if score >= 0.72:
+            verdict: str = "pass"
+        elif score >= 0.45:
+            verdict = "warn"
+        else:
+            verdict = "fail"
+        where = target.export_name if target is not None and target.export_name else "a new module"
+        assert (len(snapshot.nodes), len(snapshot.edges)) == before
+        return GhostResult(
+            intent=intent.intent,
+            title=intent.title,
+            verdict=verdict,  # type: ignore[arg-type]
+            extensibility=round(score, 3),
+            files_touched=files[:8],
+            core_mass_hits=[where] if hot else [],
+            new_cycles=new_cycles,
+            contract_breaks=[],
+            note=f"Agent run: attached {intent.title} on {where}.",
+        )
+
+    def _guard(self, result: GhostResult, intent: GhostIntent) -> GhostResult:
+        assert self.gate is not None
+        if self._halted:
+            return self._halted_result(result)
+        if not self.session_id:
+            self.session_id = self.gate.open(self.session_name, self.budget)
+        context = "\n".join(
+            [intent.title, result.note, *result.files_touched, *result.core_mass_hits]
+        )
+        scrub = self.gate.scrub(self.session_id, context)
+        safe = _without_secrets(result, context, scrub.text)
+        if scrub.blocked:
+            self._halted = True
+            self._halt_reason = scrub.reason or "secret scrub blocked the session"
+            return self._halted_result(safe)
+        outcome = self.gate.check(self.session_id, scrub.text, intent.intent)
+        if outcome.should_halt or outcome.iterations > self.budget:
+            self._halted = True
+            self._halt_reason = (
+                "; ".join(outcome.warnings) if outcome.warnings else f"loop budget {self.budget} exhausted"
+            )
+            return self._halted_result(safe)
+        return safe.model_copy(update={"session_id": self.session_id, "budget": self.budget})
+
+    def _trace(self, result: GhostResult) -> GhostResult:
+        assert self.tracer is not None
+        if not self.trace_id:
+            self.trace_id = self.tracer.open(self.session_name)
+        status = "error" if result.verdict == "fail" else "ok"
+        self.tracer.span(self.trace_id, result.intent, status, result.note)
+        return result.model_copy(
+            update={"trace_id": self.trace_id, "trace_url": self.tracer.url(self.trace_id)}
+        )
+
+    def _halted_result(self, result: GhostResult) -> GhostResult:
+        return result.model_copy(
+            update={
+                "verdict": "fail",
+                "note": f"Agent run: GuardLoop halted — {self._halt_reason}.",
+                "files_touched": [],
+                "core_mass_hits": [],
+                "session_id": self.session_id,
+                "budget": self.budget,
+            }
+        )
+
+
+def _without_secrets(result: GhostResult, raw: str, scrubbed: str) -> GhostResult:
+    if raw == scrubbed:
+        return result
+    files = [item for item in result.files_touched if item and item in scrubbed]
+    hits = [item for item in result.core_mass_hits if item and item in scrubbed]
+    note = result.note if result.note and result.note in scrubbed else (
+        f"Agent run: attached {result.title}. GuardLoop scrubbed the session context."
+    )
+    return result.model_copy(update={"note": note, "files_touched": files, "core_mass_hits": hits})
+
+
+def _attach_target(snapshot: Snapshot, intent: GhostIntent):
+    preferred = [node for node in snapshot.nodes if node.kind.value in intent.prefers]
+    pool = preferred or list(snapshot.nodes)
+    return pool[0] if pool else None
+
+
+def run_ghost_lab(snapshot: Snapshot, runner: GhostRunner | None = None) -> list[GhostResult]:
+    chosen = runner or HeuristicGhostRunner()
+    return [chosen.run(snapshot, intent) for intent in CATALOG]

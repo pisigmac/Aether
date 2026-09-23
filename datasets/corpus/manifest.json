@@ -1,0 +1,31 @@
+{
+  "ir_version": 1,
+  "license_allowlist": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause"],
+  "notes": "Phase 2 seed corpus. Clones only these SPDX licenses. SWHIDs filled by SoftwareHeritageAdapter.fetch_history.",
+  "repos": [
+    {
+      "name": "clsx",
+      "url": "https://github.com/lukeed/clsx",
+      "spdx": "MIT",
+      "language": "javascript",
+      "swh_origin": "https://github.com/lukeed/clsx",
+      "swhids": []
+    },
+    {
+      "name": "markupsafe",
+      "url": "https://github.com/pallets/markupsafe",
+      "spdx": "BSD-3-Clause",
+      "language": "python",
+      "swh_origin": "https://github.com/pallets/markupsafe",
+      "swhids": []
+    },
+    {
+      "name": "httpcore",
+      "url": "https://github.com/encode/httpcore",
+      "spdx": "BSD-3-Clause",
+      "language": "python",
+      "swh_origin": "https://github.com/encode/httpcore",
+      "swhids": []
+    }
+  ]
+}

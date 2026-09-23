@@ -15,6 +15,9 @@ dist/
 data/
 .aether/
 engine/.aether/
+engine/datasets/
+datasets/evolution.jsonl
+datasets/**/*.parquet
 web/.env.local
 .DS_Store
 *.log
