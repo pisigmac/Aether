@@ -27,10 +27,13 @@ export function RadarMap({ frame }: { frame: TimelineFrame }) {
         {shown.map((cell) => {
           const size = 48 + Math.min(cell.mass, 12) * 6;
           const storm = storms.has(cell.node_id);
+          const lo = cell.pressure_lo ?? cell.pressure;
+          const hi = cell.pressure_hi ?? cell.pressure;
+          const fog = hi - lo >= 0.6;
           return (
             <div
               key={cell.node_id}
-              className="relative overflow-hidden rounded-lg border border-white/10 p-3"
+              className={`relative overflow-hidden rounded-lg border border-white/10 p-3 ${fog ? "opacity-45" : ""}`}
               style={{
                 background: `linear-gradient(180deg, ${pressureColor(cell.pressure)}22, transparent)`,
               }}
@@ -48,6 +51,7 @@ export function RadarMap({ frame }: { frame: TimelineFrame }) {
               <p className="font-mono text-xs text-mist">
                 {cell.kind} · {pressureLabel(cell.pressure)} · P {cell.pressure.toFixed(2)}
               </p>
+              {fog && <p className="mt-1 text-xs text-mist">fog · wide pressure band</p>}
               {storm && <p className="mt-1 text-xs text-amber-300">storm / predicted collision</p>}
             </div>
           );

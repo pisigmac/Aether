@@ -33,8 +33,24 @@ export async function startIngestJob(body: {
   return res.json();
 }
 
+export async function cancelJob(jobId: string): Promise<JobStatus> {
+  const res = await fetch(`${API}/v1/jobs/${jobId}/cancel`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json();
+}
+
 export async function fetchJob(jobId: string): Promise<JobStatus> {
   const res = await fetch(`${API}/v1/jobs/${jobId}`);
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json();
+}
+
+export async function fetchJobs(): Promise<JobStatus[]> {
+  const res = await fetch(`${API}/v1/jobs`);
   if (!res.ok) {
     throw new Error(await res.text());
   }
@@ -49,11 +65,16 @@ export async function ingestRepo(
     velocity_override?: number | null;
   },
   onProgress?: (percent: number, stage: string) => void,
+  onJob?: (jobId: string) => void,
 ): Promise<IngestResponse> {
   const { job_id } = await startIngestJob(body);
+  onJob?.(job_id);
   for (;;) {
     const job = await fetchJob(job_id);
     onProgress?.(job.percent, job.stage);
+    if (job.status === "cancelled") {
+      throw new Error("Ingest cancelled");
+    }
     if (job.status === "done" && job.result) {
       setUniverseId(job.result.universe_id);
       return job.result;
@@ -65,8 +86,31 @@ export async function ingestRepo(
   }
 }
 
-export async function fetchForecast(universeId: string, horizon = 24): Promise<ForecastBundle> {
-  const res = await fetch(`${API}/v1/universes/${universeId}/forecast?horizon_months=${horizon}`);
+export type ForecastMode = "auto" | "heuristic" | "learned";
+
+export type PredictorInfo = {
+  name: string;
+  model_id: string;
+  training_records: number;
+  learned_available: boolean;
+};
+
+export async function fetchForecast(
+  universeId: string,
+  horizon = 24,
+  mode: ForecastMode = "auto",
+): Promise<ForecastBundle> {
+  const res = await fetch(
+    `${API}/v1/universes/${universeId}/forecast?horizon_months=${horizon}&mode=${mode}`,
+  );
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json();
+}
+
+export async function fetchPredictor(): Promise<PredictorInfo> {
+  const res = await fetch(`${API}/v1/predictor`);
   if (!res.ok) {
     throw new Error(await res.text());
   }

@@ -113,6 +113,8 @@ def sample_commits(
     # newest-first from git log; keep HEAD, then evenly sample older history
     if len(rows) <= cap:
         return list(reversed(rows))
+    if cap <= 1:
+        return [rows[0]]
 
     head, rest = rows[0], rows[1:]
     step = max(len(rest) / (cap - 1), 1.0)

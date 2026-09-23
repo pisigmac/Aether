@@ -10,6 +10,8 @@ export type NodeMetrics = {
   velocity: number;
   momentum: number;
   pressure: number;
+  pressure_lo?: number;
+  pressure_hi?: number;
   dependents: number;
 };
 
@@ -77,6 +79,8 @@ export type ForecastBundle = {
   warnings: string[];
   heuristic: boolean;
   license: string;
+  model_id?: string;
+  training_records?: number;
 };
 
 export type IngestResponse = {
@@ -90,9 +94,11 @@ export type IngestResponse = {
 
 export type JobStatus = {
   job_id: string;
-  status: "queued" | "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error" | "cancelled";
   percent: number;
   stage: string;
   error: string;
   result: IngestResponse | null;
+  created_at?: string;
+  label?: string;
 };

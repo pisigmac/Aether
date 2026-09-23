@@ -15,3 +15,16 @@ def test_job_progress_lifecycle():
     assert done.status == "done"
     assert done.percent == 100
     assert done.result["universe_id"] == "abc"
+
+
+def test_job_list_newest_first():
+    store = JobStore()
+    older = store.create(label="first")
+    newer = store.create(label="second")
+    store.update(older.id, 10, "Parsing")
+    rows = store.list(limit=10)
+    assert [row.id for row in rows] == [newer.id, older.id]
+    assert rows[1].label == "first"
+    assert rows[1].percent == 10
+    assert rows[0].created_at
+    assert len(store.list(limit=1)) == 1

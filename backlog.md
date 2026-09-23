@@ -21,7 +21,7 @@ Rules carried forward from Phase 1:
 | Phase | Name | Outcome | Status |
 | --- | --- | --- | --- |
 | 1 | Vertical slice | Ingest → IR → heuristic forecast → weather UI | **done** |
-| 2 | Learned Time Machine | Legal corpus + first trained model on Evolution Records | next |
+| 2 | Learned Time Machine | Legal corpus + first trained model on Evolution Records | **now** |
 | 3 | Agentic Ghost Lab | Real ghost developers behind `GhostRunner`, gated | later |
 | 4 | Polyglot + scale | More languages on IR v1; graph kernel if needed | later |
 | 5 | Product | SSO, orgs, hosted ingest — the original brief is complete | later |
@@ -59,31 +59,31 @@ Shipped 2026-09-22. Closed here so later phases can point at seams.
 
 | ID | Pri | Status | Item | Acceptance | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P2-01 | P0 | next | Implement `GhArchiveAdapter.fetch_velocity` | Returns commits/week (and actor count) from GH Archive hourly dumps or BigQuery `githubarchive`. No HTML scrape. | Query lives on the stub. Use for velocity prior when local git is thin. |
-| P2-02 | P0 | next | Implement `SoftwareHeritageAdapter.fetch_history` | Returns revision/directory chain for an origin via SWH graph / SWHIDs. Bulk-access terms and Ethical Charter respected. Content fetched only for allowlisted licenses. | Not a mirror of the archive. |
-| P2-03 | P0 | next | License-filtered seed corpus (2–3 small OSS repos, then tens) | Each clone MIT / Apache-2.0 / BSD. Evolution Records written for every sample. Corpus manifest checked in under `datasets/` (URLs + SPDX + SWHIDs). | Start with repos already proven in Phase 1 tests (`clsx`, `markupsafe`, `httpcore`). |
-| P2-04 | P0 | next | Training export | `aether export-evolution --out parquet` (or JSONL) dumps `evolution` rows with `horizon_target` filled. Schema matches [`datasets/SCHEMA.md`](datasets/SCHEMA.md). | This is the supervised table. Do not invent a second schema. |
-| P2-05 | P1 | later | Ingest cancel + size caps | Job can be cancelled. Reject / warn above configurable file count, snapshot count, and clone size. Progress bar shows cancel. | Builds on P1-10. |
-| P2-06 | P1 | later | Clone progress from `git --progress` | Percent during clone/fetch, not a flat 8–12% hold. | |
-| P2-07 | P2 | later | Optional OSS allowlist clones in UI | Ingest page offers 3 documented demo URLs. | Marketing, not required for the model. |
+| P2-01 | P0 | now | Implement `GhArchiveAdapter.fetch_velocity` | Returns commits/week (and actor count) from GH Archive hourly dumps or BigQuery `githubarchive`. No HTML scrape. | Query lives on the stub. Use for velocity prior when local git is thin. |
+| P2-02 | P0 | now | Implement `SoftwareHeritageAdapter.fetch_history` | Returns revision/directory chain for an origin via SWH graph / SWHIDs. Bulk-access terms and Ethical Charter respected. Content fetched only for allowlisted licenses. | Not a mirror of the archive. |
+| P2-03 | P0 | now | License-filtered seed corpus (2–3 small OSS repos, then tens) | Each clone MIT / Apache-2.0 / BSD. Evolution Records written for every sample. Corpus manifest checked in under `datasets/` (URLs + SPDX + SWHIDs). | `aether seed-corpus` reads `datasets/corpus/manifest.json` (`clsx`, `markupsafe`, `httpcore`). Optional `--local NAME=PATH` and `--fetch-swhids`. |
+| P2-04 | P0 | now | Training export | `aether export-evolution --out parquet` (or JSONL) dumps `evolution` rows with `horizon_target` filled. Schema matches [`datasets/SCHEMA.md`](datasets/SCHEMA.md). | This is the supervised table. Do not invent a second schema. |
+| P2-05 | P1 | now | Ingest cancel + size caps | Job can be cancelled. Reject / warn above configurable file count, snapshot count, and clone size. Progress bar shows cancel. | `POST /v1/jobs/{id}/cancel`. Caps: `AETHER_MAX_SOURCE_FILES`, `AETHER_MAX_CLONE_BYTES`, `AETHER_MAX_SNAPSHOTS`. |
+| P2-06 | P1 | now | Clone progress from `git --progress` | Percent during clone/fetch, not a flat 8–12% hold. | Git percent maps onto ingest 8–16. |
+| P2-07 | P2 | now | Optional OSS allowlist clones in UI | Ingest page offers 3 documented demo URLs. | clsx, markupsafe, httpcore. Fills the URL field. |
 
 ### Model
 
 | ID | Pri | Status | Item | Acceptance | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P2-10 | P0 | next | Baseline regressor on `metric_vector` | Predict `horizon_target` from current vector + `delta_from_prev` + velocity. Beat heuristic MAE on a frozen split. | Start linear / gradient boosting. No LLM required. |
-| P2-11 | P0 | next | `TimeMachine` swap seam | `build_timeline` uses a `Predictor` protocol: heuristic default, learned if a model file is present. `ForecastBundle.heuristic` is `false` when learned. | Do not fork a second forecast payload. |
-| P2-12 | P1 | next | Pattern-label model (optional head) | Predict `pattern_labels` at +K samples. Used to drive Cost Horizon drivers, not Radar copy. | |
-| P2-13 | P1 | later | Calibration + confidence | Each timeline cell can carry `pressure_lo` / `pressure_hi`. Radar fog when interval is wide. | Honest uncertainty. |
-| P2-14 | P2 | later | Narrative templates from predicted labels | Keep structured `narrative_kind`. Do not free-generate architecture fiction. | |
+| P2-10 | P0 | now | Baseline regressor on `metric_vector` | Predict `horizon_target` from current vector + `delta_from_prev` + velocity. Beat heuristic MAE on a frozen split. | Residual + standardized features. Old absolute model files still load. |
+| P2-11 | P0 | now | `TimeMachine` swap seam | `build_timeline` uses a `Predictor` protocol: heuristic default, learned if a model file is present. `ForecastBundle.heuristic` is `false` when learned. | Do not fork a second forecast payload. |
+| P2-12 | P1 | now | Pattern-label model (optional head) | Predict `pattern_labels` at +K samples. Used to drive Cost Horizon drivers, not Radar copy. | Trained only when consecutive records carry labels. Heuristic Cost Horizon still uses `detect_patterns`. |
+| P2-13 | P1 | now | Calibration + confidence | Each timeline cell can carry `pressure_lo` / `pressure_hi`. Radar fog when interval is wide. | Band widens with slope and months. Month 0 on a flat series is a point. Fog at width ≥ 0.6. |
+| P2-14 | P2 | now | Narrative templates from predicted labels | Keep structured `narrative_kind`. Do not free-generate architecture fiction. | Heuristic timeline keeps the pressure narrative. Templates apply only when the pattern head returns labels. |
 
 ### Product / UX
 
 | ID | Pri | Status | Item | Acceptance |
 | --- | --- | --- | --- | --- |
-| P2-20 | P0 | next | Source badge on Radar | “Heuristic from this repo’s history” vs “Learned model vN · trained on M Evolution Records”. |
-| P2-21 | P1 | later | Job list | Ingest page shows recent jobs (percent, stage, error) from `GET /v1/jobs`. |
-| P2-22 | P1 | later | Compare heuristic vs learned | Toggle on one universe. Same `ChangeSet`. |
+| P2-20 | P0 | now | Source badge on Radar | “Heuristic from this repo’s history” vs “Learned model vN · trained on M Evolution Records”. |
+| P2-21 | P1 | now | Job list | Ingest page shows recent jobs (percent, stage, error) from `GET /v1/jobs`. | In-memory store, newest first. Existing `GET /v1/jobs/{id}` unchanged. |
+| P2-22 | P1 | now | Compare heuristic vs learned | Toggle on one universe. Same `ChangeSet`. | `GET /v1/universes/{id}/forecast?mode=heuristic\|learned`. Compare does not overwrite the cached auto forecast. |
 
 ### Phase 2 non-goals
 
@@ -102,9 +102,9 @@ Shipped 2026-09-22. Closed here so later phases can point at seams.
 
 | ID | Pri | Status | Item | Acceptance | Depends |
 | --- | --- | --- | --- | --- | --- |
-| P3-01 | P0 | later | `GhostRunner` agent implementation | Second runner satisfies the same protocol as the heuristic planner. Catalog intents unchanged. | P1-08 |
-| P3-02 | P0 | later | GuardLoop gate | Every ghost session has a budget, loop detect, and secret scrub. No keys in Aether env — KeyMint. | GuardLoop + KeyMint as services |
-| P3-03 | P0 | later | TraceLens (or OTLP) per ghost | Each `GhostResult` carries `trace_id`. Dashboard links out. | TraceLens |
+| P3-01 | P0 | now | `GhostRunner` agent implementation | Second runner satisfies the same protocol as the heuristic planner. Catalog intents unchanged. | `AgentGhostRunner` attaches a shadow IR node. `run_ghost_lab()` still defaults to `HeuristicGhostRunner`. |
+| P3-02 | P0 | now | GuardLoop gate | Every ghost session has a budget, loop detect, and secret scrub. No keys in Aether env — KeyMint. | `POST /v1/universes/{id}/ghosts` opens one GuardLoop task per agent lab (`max_loops`, strict scrub, loop-check). Heuristic forecast is unchanged. Bearer key is a request header, not an Aether setting. KeyMint still supplies that key when it is the broker. |
+| P3-03 | P0 | now | TraceLens (or OTLP) per ghost | Each `GhostResult` carries `trace_id`. Dashboard links out. | Agent ghost sessions post one TraceLens trace when `AETHER_TRACELENS_URL` is set. The JWT is the `X-TraceLens-Key` header. Heuristic forecast stays untraced. |
 | P3-04 | P0 | later | Sandbox checkout | Ghosts write in a worktree / temp clone, never the user’s dirty tree. | |
 | P3-05 | P1 | later | IR-first ghosts (cheap path) | Agent may propose IR mutations only; physics re-scores without applying a full patch. | P3-01 |
 | P3-06 | P1 | later | Intent pack v2 | Keep the 8 Phase 1 intents. Add `add_openapi_client`, `extract_service`, `add_queue`. | |
@@ -201,3 +201,4 @@ Always allowed, any phase, if they do not skip phase exits.
 | Date | Change |
 | --- | --- |
 | 2026-09-23 | Backlog created. Phase 1 closed. Phase 2 is the next workstream. |
+| 2026-09-23 | Phase 2 P0 in progress on `dev`: GH Archive + SWH adapters, corpus manifest, export/train CLI, linear predictor, Radar source badge. |

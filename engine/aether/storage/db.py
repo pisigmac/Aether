@@ -122,6 +122,12 @@ class AetherDB:
         ).fetchall()
         return [EvolutionRecord.model_validate_json(r["payload"]) for r in rows]
 
+    def list_all_evolution(self) -> list[EvolutionRecord]:
+        rows = self.conn.execute(
+            "SELECT payload FROM evolution ORDER BY authored_at"
+        ).fetchall()
+        return [EvolutionRecord.model_validate_json(r["payload"]) for r in rows]
+
     def upsert_changeset(self, changeset: ChangeSet) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO changesets (id, universe_id, payload) VALUES (?, ?, ?)",

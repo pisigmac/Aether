@@ -137,6 +137,8 @@ class Forecast(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     heuristic: bool = True
     license: str = ""
+    model_id: str = "heuristic"
+    training_records: int = 0
 
     def frame(self, months: float = 8) -> TimelineFrame | None:
         if not self.timeline:

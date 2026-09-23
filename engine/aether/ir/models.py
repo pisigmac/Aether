@@ -118,6 +118,8 @@ class NodeMetrics(BaseModel):
     velocity: float
     momentum: float
     pressure: float
+    pressure_lo: float = 0.0
+    pressure_hi: float = 0.0
     dependents: int = 0
 
 
@@ -162,6 +164,10 @@ class GhostResult(BaseModel):
     new_cycles: int = 0
     contract_breaks: list[str] = Field(default_factory=list)
     note: str = ""
+    session_id: str = ""
+    budget: int = 0
+    trace_id: str = ""
+    trace_url: str = ""
 
 
 class CostBand(BaseModel):
@@ -185,3 +191,5 @@ class ForecastBundle(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     heuristic: bool = True
     license: str = ""
+    model_id: str = "heuristic"
+    training_records: int = 0

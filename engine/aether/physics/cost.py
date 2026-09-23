@@ -33,9 +33,10 @@ def build_costs(
     velocity: float,
     traffic_growth: float = 0.08,
     drivers: dict[str, dict[str, float]] | None = None,
+    labels: list[str] | None = None,
 ) -> list[CostBand]:
     table = drivers or load_drivers()
-    labels = detect_patterns(snapshot)
+    labels = detect_patterns(snapshot) if labels is None else list(labels)
     base = {"compute": 12.0, "storage": 4.0, "egress": 3.0}
     for label in labels:
         inc = table.get(label)

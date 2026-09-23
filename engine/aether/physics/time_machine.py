@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from aether.ir.models import Collision, NodeMetrics, Snapshot, TimelineFrame
-from aether.physics.metrics import detect_patterns, node_metrics, path_churn
+from aether.physics.metrics import detect_patterns, metric_vector, node_metrics, path_churn
+from aether.physics.predictor import HeuristicPredictor, Predictor, scale_from_prediction
 
 
 def _smooth(series: list[float], alpha: float = 0.45) -> float:
@@ -29,6 +30,8 @@ def build_timeline(
     snapshots: list[Snapshot],
     horizon_months: int,
     velocity: float,
+    predictor: Predictor | None = None,
+    pattern_labels: list[str] | None = None,
 ) -> list[TimelineFrame]:
     if not snapshots:
         return []
@@ -36,6 +39,23 @@ def build_timeline(
     history: dict[str, list[NodeMetrics]] = {}
     last = snapshots[-1]
     last_cells = {c.node_id: c for c in node_metrics(last, churn)}
+    predictor = predictor or HeuristicPredictor()
+    current_vec = metric_vector(last, list(last_cells.values()))
+    prev = snapshots[-2] if len(snapshots) > 1 else None
+    delta = {"nodes_added": 0, "nodes_removed": 0, "edges_added": 0, "edges_removed": 0}
+    if prev:
+        prev_n = {n.id for n in prev.nodes}
+        cur_n = {n.id for n in last.nodes}
+        prev_e = {(e.src, e.dst, e.kind) for e in prev.edges}
+        cur_e = {(e.src, e.dst, e.kind) for e in last.edges}
+        delta = {
+            "nodes_added": len(cur_n - prev_n),
+            "nodes_removed": len(prev_n - cur_n),
+            "edges_added": len(cur_e - prev_e),
+            "edges_removed": len(prev_e - cur_e),
+        }
+    predicted = predictor.predict(current_vec, delta, velocity)
+    growth = scale_from_prediction(current_vec, predicted)
     for snap in snapshots:
         for cell in node_metrics(snap, churn):
             history.setdefault(cell.node_id, []).append(cell)
@@ -55,17 +75,24 @@ def build_timeline(
             p0, m0, v0 = _smooth(series_p), _smooth(series_m), _smooth(series_v)
             # months → future samples via team velocity (commits/week)
             steps = months * (velocity * 4.3) / 1000.0
+            horizon_scale = 1.0 + (growth - 1.0) * (months / max(horizon_months, 1))
             pressure = max(0.0, p0 + _slope(series_p) * (1 + months / 6.0) + steps * 0.15)
+            pressure *= horizon_scale
             mass = max(0.1, m0 + _slope(series_m) * (months / 8.0))
+            mass *= horizon_scale
             vel = max(0.02, v0 + _slope(series_v) * (months / 12.0))
             if cell.kind == "schema":
                 pressure += months / 24.0 * 0.55
             if cell.kind == "contract" and cell.label.rstrip("/").endswith("s"):
                 pressure += months / 24.0 * 0.4
+            pressure = round(min(pressure, 3.5), 3)
+            lo, hi = pressure_band(pressure, _slope(series_p), months)
             cells.append(
                 cell.model_copy(
                     update={
-                        "pressure": round(min(pressure, 3.5), 3),
+                        "pressure": pressure,
+                        "pressure_lo": lo,
+                        "pressure_hi": hi,
                         "mass": round(mass, 3),
                         "velocity": round(vel, 3),
                         "momentum": round(mass * vel, 3),
@@ -75,6 +102,8 @@ def build_timeline(
 
         collisions = _collisions(cells, last, months)
         kind, narrative = _narrative(cells, collisions, months, detect_patterns(last))
+        if pattern_labels and months > 0:
+            kind, narrative = narrative_from_labels(pattern_labels, months, kind, narrative)
         label = "now" if months == 0 else f"+{int(months)}mo"
         frames.append(
             TimelineFrame(
@@ -108,6 +137,68 @@ def _collisions(cells: list[NodeMetrics], snapshot: Snapshot, months: float) -> 
                 )
             )
     return sorted(out, key=lambda c: c.intensity, reverse=True)[:8]
+
+
+def pressure_band(pressure: float, slope: float, months: float) -> tuple[float, float]:
+    """Closed interval around pressure. Month 0 on a flat series is a point."""
+    spread = min(1.2, abs(slope) * (months / 6.0) + months / 48.0)
+    lo = max(0.0, pressure - spread)
+    hi = min(3.5, pressure + spread)
+    return round(lo, 3), round(hi, 3)
+
+
+_LABEL_NARRATIVES: dict[str, tuple[str, str]] = {
+    "god_module": (
+        "rising_pressure",
+        "A god module is predicted to stay hot at +{months} months. Split it before the next feature cycle.",
+    ),
+    "cyclic_dep": (
+        "bottleneck",
+        "A dependency cycle is predicted at +{months} months. Break the cycle before pressure locks in.",
+    ),
+    "schema_leak": (
+        "bottleneck",
+        "A schema leak is predicted at +{months} months. The contract path will carry storage shape outward.",
+    ),
+    "unbounded_list": (
+        "rising_pressure",
+        "An unbounded list is predicted at +{months} months. Add a page limit before traffic scales.",
+    ),
+    "chatty_rpc": (
+        "rising_pressure",
+        "Chatty RPC is predicted at +{months} months. Collapse the call fan-out.",
+    ),
+    "missing_index": (
+        "bottleneck",
+        "A missing index is predicted at +{months} months. The hot query will dominate cost.",
+    ),
+    "dual_write": (
+        "bottleneck",
+        "A dual write is predicted at +{months} months. One store will drift.",
+    ),
+}
+
+
+def narrative_from_labels(
+    labels: list[str],
+    months: float,
+    fallback_kind: str,
+    fallback_text: str,
+) -> tuple[str, str]:
+    for label in (
+        "god_module",
+        "cyclic_dep",
+        "schema_leak",
+        "unbounded_list",
+        "missing_index",
+        "dual_write",
+        "chatty_rpc",
+    ):
+        if label not in labels:
+            continue
+        kind, template = _LABEL_NARRATIVES[label]
+        return kind, template.format(months=int(months))
+    return fallback_kind, fallback_text
 
 
 def _narrative(

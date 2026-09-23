@@ -24,6 +24,11 @@ export default function RadarPage() {
           <p className="font-mono text-xs text-mist">
             {bundle.velocity_commits_per_week} commits/week · {bundle.horizon_months}-month horizon
           </p>
+          <p className="mt-1 font-mono text-xs text-sky-200/90">
+            {bundle.heuristic
+              ? "Heuristic from this repo’s history"
+              : `Learned model ${bundle.model_id || "v1"} · trained on ${bundle.training_records ?? 0} Evolution Records`}
+          </p>
         </div>
       </div>
       <PressureGuide />
