@@ -9,7 +9,7 @@ from aether.api import app
 from aether.config import Settings, settings
 from aether.gates.guardloop import GuardLoopClient, GuardLoopError, GuardLoopGate, LoopOutcome, ScrubOutcome
 from aether.ir.models import Node, NodeKind
-from aether.physics.ghosts import AgentGhostRunner, run_ghost_lab
+from aether.physics.ghosts import CATALOG, AgentGhostRunner, run_ghost_lab
 from tests.test_api import _universe
 from tests.test_physics import _snap
 
@@ -109,17 +109,20 @@ def test_agent_session_uses_one_task_budget_scrub_and_loop_check():
     host, port = server.server_address
     try:
         client = GuardLoopClient(f"http://{host}:{port}", api_key="gl_live_test_key")
-        ghosts = run_ghost_lab(_snap("a", "2026-01-01T00:00:00+00:00"), AgentGhostRunner(GuardLoopGate(client), budget=8))
-        assert len(ghosts) == 8
+        ghosts = run_ghost_lab(
+            _snap("a", "2026-01-01T00:00:00+00:00"),
+            AgentGhostRunner(GuardLoopGate(client), budget=len(CATALOG)),
+        )
+        assert len(ghosts) == len(CATALOG)
         assert {ghost.session_id for ghost in ghosts} == {"task-1"}
-        assert {ghost.budget for ghost in ghosts} == {8}
+        assert {ghost.budget for ghost in ghosts} == {len(CATALOG)}
         assert all(ghost.note.startswith("Agent run:") for ghost in ghosts)
         creates = [item for item in _Handler.seen if item["path"] == "/tasks"]
-        assert creates[0]["body"]["max_loops"] == 8
+        assert creates[0]["body"]["max_loops"] == len(CATALOG)
         assert creates[0]["body"]["name"] == "aether-ghost-lab"
         assert creates[0]["authorization"] == "Bearer gl_live_test_key"
-        assert sum(item["path"] == "/pii/scrub" for item in _Handler.seen) == 8
-        assert sum(item["path"] == "/tasks/task-1/loop-check" for item in _Handler.seen) == 8
+        assert sum(item["path"] == "/pii/scrub" for item in _Handler.seen) == len(CATALOG)
+        assert sum(item["path"] == "/tasks/task-1/loop-check" for item in _Handler.seen) == len(CATALOG)
         assert any(item["path"] == "/tasks/task-1/start" for item in _Handler.seen)
     finally:
         server.shutdown()
@@ -212,12 +215,21 @@ def test_ghost_endpoint_is_gated_and_leaves_forecast_heuristic(tmp_path, monkeyp
             missing = client.post("/v1/universes/u1/ghosts")
             assert missing.status_code == 503
             monkeypatch.setattr(settings, "guardloop_url", f"http://{host}:{port}")
-            gated = client.post("/v1/universes/u1/ghosts?budget=8", headers={"X-GuardLoop-Key": "gl_live_header"})
+            gated = client.post(
+                f"/v1/universes/u1/ghosts?budget={len(CATALOG)}",
+                headers={"X-GuardLoop-Key": "gl_live_header"},
+            )
             assert gated.status_code == 200
-            rows = gated.json()
+            body = gated.json()
+            rows = body["ghosts"]
+            assert body["parallel"] == 4
+            assert "hard max 16" in body["disclosure"]
+            assert body["sandbox"]
             assert rows[0]["session_id"] == "task-1"
+            assert rows[0]["ir_only"] is True
+            assert rows[0]["artifact_path"]
             assert _Handler.seen[0]["body"]["name"] == "aether-ghost:u1"
-            assert rows[0]["budget"] == 8
+            assert rows[0]["budget"] == len(CATALOG)
             forecast = client.get("/v1/universes/u1/forecast")
             assert forecast.status_code == 200
             assert all("attach via" in ghost["note"].lower() for ghost in forecast.json()["ghosts"])

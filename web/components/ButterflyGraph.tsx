@@ -60,10 +60,10 @@ export function ButterflyGraph({ frames }: { frames: ButterflyFrame[] }) {
       <div className="h-[520px]">
         <ForceGraph2D
           graphData={graph}
-          backgroundColor="#07111c"
+          backgroundColor="#141910"
           nodeLabel={(n: any) => `${n.name} (${n.path_type || n.kind})`}
           nodeColor={(n: any) => pressureColor(n.intensity)}
-          linkColor={() => "rgba(159,179,200,0.35)"}
+          linkColor={() => "rgba(183,170,147,0.4)"}
           nodeRelSize={5}
         />
       </div>

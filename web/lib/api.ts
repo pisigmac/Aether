@@ -1,4 +1,4 @@
-import type { ForecastBundle, IngestResponse, JobStatus } from "./types";
+import type { ForecastBundle, GhostRun, IngestResponse, JobStatus } from "./types";
 
 const API = process.env.NEXT_PUBLIC_AETHER_API || "http://localhost:8000";
 const UNIVERSE_KEY = "aether.universe_id";
@@ -113,6 +113,32 @@ export async function fetchPredictor(): Promise<PredictorInfo> {
   const res = await fetch(`${API}/v1/predictor`);
   if (!res.ok) {
     throw new Error(await res.text());
+  }
+  return res.json();
+}
+
+export async function runAgentGhosts(
+  universeId: string,
+  parallel = 4,
+  budget = 50,
+  tracelensKey = "",
+): Promise<GhostRun> {
+  const headers: Record<string, string> = {};
+  if (tracelensKey) headers["X-TraceLens-Key"] = tracelensKey;
+  const res = await fetch(
+    `${API}/v1/universes/${universeId}/ghosts?budget=${budget}&parallel=${parallel}`,
+    { method: "POST", headers },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed.detail === "string") message = parsed.detail;
+    } catch {
+      // keep the raw response text
+    }
+    throw new Error(message);
   }
   return res.json();
 }
