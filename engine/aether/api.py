@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -12,12 +13,19 @@ from aether.acquisition.git_ingest import IngestRequest
 from aether.config import settings
 from aether.gates.guardloop import GuardLoopClient, GuardLoopError, GuardLoopGate
 from aether.gates.tracelens import TraceLensClient, TraceLensError, TraceLensTracer
-from aether.ir.models import ChangeSet, ForecastBundle, GhostResult
+from aether.ir.models import ChangeSet, ForecastBundle, GhostRun
 from aether.jobs import IngestCancelled, store as job_store
 from aether.parsers.ids import stable_id
 from aether.physics.butterfly import apply_changeset
 from aether.physics.forecast import build_forecast, graph_slice
-from aether.physics.ghosts import AgentGhostRunner, run_ghost_lab
+from aether.physics.ghosts import (
+    DEFAULT_GHOST_PARALLEL,
+    MAX_GHOST_PARALLEL,
+    AgentGhostRunner,
+    disclose_parallel,
+    run_ghost_lab,
+)
+from aether.physics.sandbox import open_sandbox
 from aether.physics.predictor import predictor_for_mode, resolve_predictor
 from aether.pipeline import attach_changeset, build_universe
 from aether.storage.db import AetherDB
@@ -253,13 +261,14 @@ def get_forecast(universe_id: str, horizon_months: int = 24, mode: str = "auto")
     return bundle
 
 
-@app.post("/v1/universes/{universe_id}/ghosts", response_model=list[GhostResult])
+@app.post("/v1/universes/{universe_id}/ghosts", response_model=GhostRun)
 def run_guarded_ghosts(
     universe_id: str,
     budget: int = Query(default=50, ge=1, le=500),
+    parallel: int = Query(default=DEFAULT_GHOST_PARALLEL, ge=1, le=MAX_GHOST_PARALLEL),
     x_guardloop_key: Annotated[str | None, Header()] = None,
     x_tracelens_key: Annotated[str | None, Header()] = None,
-) -> list[GhostResult]:
+) -> GhostRun:
     if not settings.guardloop_url:
         raise HTTPException(503, "GuardLoop URL is not configured")
     if settings.tracelens_url and not x_tracelens_key:
@@ -271,6 +280,7 @@ def run_guarded_ghosts(
     changesets = store.list_changesets(universe_id)
     changeset = changesets[-1] if changesets else None
     projected = apply_changeset(universe.snapshots[-1], changeset)
+    sandbox = open_sandbox(universe.repo_path, settings.data_dir / "ghost-sandboxes" / universe_id)
     gate = GuardLoopGate(GuardLoopClient(settings.guardloop_url, api_key=x_guardloop_key or ""))
     tracer = None
     if settings.tracelens_url:
@@ -283,11 +293,20 @@ def run_guarded_ghosts(
         budget=budget,
         session_name=f"aether-ghost:{universe_id}",
         tracer=tracer,
+        sandbox=sandbox,
     )
+    started = time.perf_counter()
     try:
-        return run_ghost_lab(projected, runner)
-    except (GuardLoopError, TraceLensError) as exc:
+        ghosts = run_ghost_lab(projected, runner, parallel=parallel)
+    except (GuardLoopError, TraceLensError, ValueError) as exc:
         raise HTTPException(502, str(exc)) from exc
+    return GhostRun(
+        parallel=parallel,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        disclosure=disclose_parallel(parallel),
+        sandbox=str(sandbox),
+        ghosts=ghosts,
+    )
 
 
 @app.get("/v1/universes/{universe_id}/graph")

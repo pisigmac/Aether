@@ -175,6 +175,14 @@ with Aether("http://127.0.0.1:8000") as aether:
 ## Quick start
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/pisigmac/Aether/main/install.sh | bash
+```
+
+That clones Aether, installs the engine and dashboard, seeds the demo fixture, and starts both. From a checkout you already have, run `./install.sh`. Set `AETHER_START=0` to install without launching.
+
+Or install by hand:
+
+```bash
 # 1. Engine
 cd engine
 python3 -m venv .venv

@@ -13,14 +13,14 @@ export function CostChart({ costs }: { costs: CostBand[] }) {
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={costs}>
             <CartesianGrid stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="month" stroke="#9fb3c8" tickFormatter={(v) => `+${v}m`} />
-            <YAxis stroke="#9fb3c8" />
+            <XAxis dataKey="month" stroke="#b7aa93" tickFormatter={(v) => `+${v}m`} />
+            <YAxis stroke="#b7aa93" />
             <Tooltip
-              contentStyle={{ background: "#0d1b2a", border: "1px solid rgba(255,255,255,0.1)" }}
+              contentStyle={{ background: "#10160f", border: "1px solid rgba(243,236,223,0.12)", color: "#f3ecdf" }}
             />
-            <Area type="monotone" dataKey="compute" stackId="1" stroke="#3d9ee0" fill="#3d9ee055" />
-            <Area type="monotone" dataKey="storage" stackId="1" stroke="#d4a017" fill="#d4a01744" />
-            <Area type="monotone" dataKey="egress" stackId="1" stroke="#e05a4f" fill="#e05a4f33" />
+            <Area type="monotone" dataKey="compute" stackId="1" stroke="#7dbea8" fill="#7dbea855" />
+            <Area type="monotone" dataKey="storage" stackId="1" stroke="#e7a15a" fill="#e7a15a44" />
+            <Area type="monotone" dataKey="egress" stackId="1" stroke="#e36b5a" fill="#e36b5a33" />
           </AreaChart>
         </ResponsiveContainer>
       </div>

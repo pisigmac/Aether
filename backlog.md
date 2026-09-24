@@ -100,16 +100,18 @@ Shipped 2026-09-22. Closed here so later phases can point at seams.
 
 **Exit.** At least four catalog intents run as real agents on `polyglot-debt` and one OSS repo. Each run has a verdict, files touched, and a trace id. UI still says “agent run”, never “simulated developer swarm” unless N is large and disclosed.
 
+**Met.** `polyglot-debt` trace `dddbbe8619fc4baeb3ad3614f34904da` and pandas trace `d4cefc6900df4126b1436b4b12ece004`. Each trace has 11 spans. Every intent returned a verdict and files touched. Writes stayed in a detached worktree.
+
 | ID | Pri | Status | Item | Acceptance | Depends |
 | --- | --- | --- | --- | --- | --- |
-| P3-01 | P0 | now | `GhostRunner` agent implementation | Second runner satisfies the same protocol as the heuristic planner. Catalog intents unchanged. | `AgentGhostRunner` attaches a shadow IR node. `run_ghost_lab()` still defaults to `HeuristicGhostRunner`. |
-| P3-02 | P0 | now | GuardLoop gate | Every ghost session has a budget, loop detect, and secret scrub. No keys in Aether env — KeyMint. | `POST /v1/universes/{id}/ghosts` opens one GuardLoop task per agent lab (`max_loops`, strict scrub, loop-check). Heuristic forecast is unchanged. Bearer key is a request header, not an Aether setting. KeyMint still supplies that key when it is the broker. |
-| P3-03 | P0 | now | TraceLens (or OTLP) per ghost | Each `GhostResult` carries `trace_id`. Dashboard links out. | Agent ghost sessions post one TraceLens trace when `AETHER_TRACELENS_URL` is set. The JWT is the `X-TraceLens-Key` header. Heuristic forecast stays untraced. |
-| P3-04 | P0 | later | Sandbox checkout | Ghosts write in a worktree / temp clone, never the user’s dirty tree. | |
-| P3-05 | P1 | later | IR-first ghosts (cheap path) | Agent may propose IR mutations only; physics re-scores without applying a full patch. | P3-01 |
-| P3-06 | P1 | later | Intent pack v2 | Keep the 8 Phase 1 intents. Add `add_openapi_client`, `extract_service`, `add_queue`. | |
-| P3-07 | P2 | later | Parallel ghosts with a cap | Configurable N (default 4, hard max 16). Copy discloses N. Not “thousands” until cost and GuardLoop say so. | P3-02 |
-| P3-08 | P1 | later | Ghost Lab UI: run / replay / fail reason | Table already exists. Add run button, duration, trace link, artifact path. | |
+| P3-01 | P0 | done | `GhostRunner` agent implementation | Second runner satisfies the same protocol as the heuristic planner. Catalog intents unchanged. | `AgentGhostRunner` attaches a shadow IR node. `run_ghost_lab()` still defaults to `HeuristicGhostRunner`. |
+| P3-02 | P0 | done | GuardLoop gate | Every ghost session has a budget, loop detect, and secret scrub. No keys in Aether env — KeyMint. | `POST /v1/universes/{id}/ghosts` opens one GuardLoop task per agent lab (`max_loops`, strict scrub, loop-check). Heuristic forecast is unchanged. Bearer key is a request header, not an Aether setting. KeyMint still supplies that key when it is the broker. |
+| P3-03 | P0 | done | TraceLens (or OTLP) per ghost | Each `GhostResult` carries `trace_id`. Dashboard links out. | Agent ghost sessions post one TraceLens trace when `AETHER_TRACELENS_URL` is set. The JWT is the `X-TraceLens-Key` header. Heuristic forecast stays untraced. |
+| P3-04 | P0 | done | Sandbox checkout | Ghosts write in a worktree / temp clone, never the user’s dirty tree. | Agent runs call `git worktree add --detach` under `data/ghost-sandboxes`. The user checkout is not written. |
+| P3-05 | P1 | done | IR-first ghosts (cheap path) | Agent may propose IR mutations only; physics re-scores without applying a full patch. | `ir_only` and `ir_mutation` on agent results. The sandbox file is a stub, not a patch. |
+| P3-06 | P1 | done | Intent pack v2 | Keep the 8 Phase 1 intents. Add `add_openapi_client`, `extract_service`, `add_queue`. | `PHASE1_INTENTS` stays the original eight. |
+| P3-07 | P2 | done | Parallel ghosts with a cap | Configurable N (default 4, hard max 16). Copy discloses N. Not “thousands” until cost and GuardLoop say so. | `POST /ghosts?parallel=`. Response `disclosure` states the width. Forecast stays sequential. |
+| P3-08 | P1 | done | Ghost Lab UI: run / replay / fail reason | Table already exists. Add run button, duration, trace link, artifact path. | Heuristic table stays. Run loads the agent result beside it. |
 
 ### Phase 3 non-goals
 

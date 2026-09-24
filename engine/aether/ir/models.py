@@ -168,6 +168,18 @@ class GhostResult(BaseModel):
     budget: int = 0
     trace_id: str = ""
     trace_url: str = ""
+    artifact_path: str = ""
+    fail_reason: str = ""
+    ir_only: bool = False
+    ir_mutation: str = ""
+
+
+class GhostRun(BaseModel):
+    parallel: int
+    duration_ms: int
+    disclosure: str
+    sandbox: str = ""
+    ghosts: list[GhostResult] = Field(default_factory=list)
 
 
 class CostBand(BaseModel):

@@ -56,6 +56,22 @@ export type GhostResult = {
   new_cycles: number;
   contract_breaks: string[];
   note: string;
+  session_id?: string;
+  budget?: number;
+  trace_id?: string;
+  trace_url?: string;
+  artifact_path?: string;
+  fail_reason?: string;
+  ir_only?: boolean;
+  ir_mutation?: string;
+};
+
+export type GhostRun = {
+  parallel: number;
+  duration_ms: number;
+  disclosure: string;
+  sandbox: string;
+  ghosts: GhostResult[];
 };
 
 export type CostBand = {

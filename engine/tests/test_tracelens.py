@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from aether.api import app
 from aether.config import settings
 from aether.gates.tracelens import TraceLensClient, TraceLensTracer
-from aether.physics.ghosts import AgentGhostRunner, run_ghost_lab
+from aether.physics.ghosts import CATALOG, AgentGhostRunner, run_ghost_lab
 from tests.test_api import _universe
 from tests.test_physics import _snap
 
@@ -46,7 +46,7 @@ def test_agent_session_posts_one_trace():
         assert len({ghost.trace_id for ghost in ghosts}) == 1
         trace_id = ghosts[0].trace_id
         assert ghosts[0].trace_url == f"http://127.0.0.1:43000/traces/{trace_id}"
-        assert len(_Handler.spans) == 8
+        assert len(_Handler.spans) == len(CATALOG)
         assert {item["body"]["trace_id"] for item in _Handler.spans} == {trace_id}
         assert _Handler.spans[0]["authorization"] == "Bearer header.payload.sig"
         assert _Handler.spans[0]["body"]["spans"][0]["agent_type"] == "aether-ghost"

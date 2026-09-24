@@ -7,7 +7,7 @@ from aether.acquisition.git_ingest import IngestRequest, ingest_repo
 from aether.acquisition.sampler import show_file
 from aether.ir.models import ChangeSet, Mutation, Node, NodeKind, Universe
 from aether.parsers.ids import schema_id, stable_id
-from aether.parsers.scan import parse_snapshot
+from aether.parsers.scan import parse_history
 from aether.physics.forecast import build_forecast
 from aether.physics.metrics import evolution_record, metric_vector, node_metrics
 from aether.jobs import ProgressFn
@@ -23,13 +23,13 @@ def build_universe(
     report = on_progress or (lambda _pct, _stage: None)
     ingested = ingest_repo(req, data_dir=data_dir, on_progress=report)
     universe_id = stable_id("universe", str(ingested.root))
-    snapshots = []
     total = max(len(ingested.samples), 1)
-    for i, sample in enumerate(ingested.samples):
-        pct = 22 + int((i / total) * 55)
-        short = sample.sha[:8] if sample.sha != "WORKING_TREE" else "working tree"
-        report(pct, f"Parsing snapshot {i + 1}/{total} ({short})")
-        snapshots.append(parse_snapshot(ingested.root, sample))
+
+    def _on_snapshot(index: int, sample_sha: str) -> None:
+        short = sample_sha[:8] if sample_sha != "WORKING_TREE" else "working tree"
+        report(22 + int((index / total) * 55), f"Parsing snapshot {index + 1}/{total} ({short})")
+
+    snapshots = parse_history(ingested.root, ingested.samples, on_snapshot=_on_snapshot)
     universe = Universe(
         id=universe_id,
         repo_path=str(ingested.root),

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aether.acquisition.sampler import SampleCommit, list_source_paths, show_file
+from aether.acquisition.sampler import (
+    SampleCommit,
+    batch_show_files,
+    diff_paths,
+    list_source_paths,
+    show_file,
+)
 from aether.ir.models import Contract, Edge, EdgeKind, Node, Snapshot
 from aether.parsers.contracts import link_contracts, load_openapi
 from aether.parsers.ids import snapshot_hash
@@ -48,50 +55,98 @@ class ParsedGraph:
 
 def parse_snapshot(root: Path, sample: SampleCommit) -> Snapshot:
     sha = None if sample.sha == "WORKING_TREE" else sample.sha
-    paths = [
-        p
-        for p in list_source_paths(root, sha)
-        if Path(p).suffix in PY_EXT | TS_EXT and not _skip(p)
-    ]
+    paths = _wanted_paths(list_source_paths(root, sha))
+    extracts = _parse_paths(root, sha, paths)
+    return _assemble(root, sample, extracts)
+
+
+def parse_history(
+    root: Path,
+    samples: list[SampleCommit],
+    on_snapshot: Callable[[int, str], None] | None = None,
+) -> list[Snapshot]:
+    """Parse a commit series, re-reading only files that changed since the previous sample."""
+    cached: dict[str, PyExtract | TsExtract] = {}
+    snapshots: list[Snapshot] = []
+    prev_sha: str | None = None
+    for index, sample in enumerate(samples):
+        if on_snapshot:
+            on_snapshot(index, sample.sha)
+        sha = None if sample.sha == "WORKING_TREE" else sample.sha
+        if prev_sha and sha and prev_sha != sha:
+            touched, removed = diff_paths(root, prev_sha, sha)
+            for path in removed:
+                cached.pop(path, None)
+            to_read = _wanted_paths(touched)
+            for path in touched:
+                if path not in to_read:
+                    cached.pop(path, None)
+        else:
+            to_read = _wanted_paths(list_source_paths(root, sha))
+            keep = set(to_read)
+            for path in list(cached):
+                if path not in keep:
+                    cached.pop(path, None)
+        parsed = _parse_paths(root, sha, to_read)
+        for path in to_read:
+            extract = parsed.get(path)
+            if extract is None:
+                cached.pop(path, None)
+            else:
+                cached[path] = extract
+        snapshots.append(_assemble(root, sample, cached))
+        prev_sha = sha
+    return snapshots
+
+
+def _wanted_paths(paths: list[str]) -> list[str]:
+    return [p for p in paths if Path(p).suffix in PY_EXT | TS_EXT and not _skip(p)]
+
+
+def _parse_paths(root: Path, sha: str | None, paths: list[str]) -> dict[str, PyExtract | TsExtract]:
+    found: dict[str, PyExtract | TsExtract] = {}
+    sources = batch_show_files(root, sha, paths)
+    for rel in paths:
+        source = sources.get(rel, "")
+        if not source.strip():
+            continue
+        if Path(rel).suffix in PY_EXT:
+            found[rel] = parse_python(rel, source)
+        else:
+            found[rel] = parse_typescript(rel, source)
+    return found
+
+
+def _assemble(root: Path, sample: SampleCommit, extracts: dict[str, PyExtract | TsExtract]) -> Snapshot:
+    sha = None if sample.sha == "WORKING_TREE" else sample.sha
     nodes: list[Node] = []
     edges: list[Edge] = []
     contracts: list[Contract] = []
     import_index: dict[str, str] = {}
-    extracted: list[tuple[str, list[str], bool]] = []
+    ordered = [extracts[path] for path in sorted(extracts)]
 
-    for rel in paths:
-        source = show_file(root, rel, sha)
-        if not source.strip():
-            continue
-        suffix = Path(rel).suffix
-        if suffix in PY_EXT:
-            extract: PyExtract | TsExtract = parse_python(rel, source)
-            python = True
-        else:
-            extract = parse_typescript(rel, source)
-            python = False
+    for extract in ordered:
         nodes.extend(extract.nodes)
         edges.extend(extract.edges)
         contracts.extend(extract.contracts)
         for n in extract.nodes:
             if n.kind.value == "module":
-                import_index[_module_key(rel)] = n.id
-        extracted.append((rel, extract.imports, python))
+                import_index[_module_key(n.path)] = n.id
 
-    for rel, imports, python in extracted:
-        src_id = import_index.get(_module_key(rel))
-        if not src_id:
+    for extract in ordered:
+        module = next((n for n in extract.nodes if n.kind.value == "module"), None)
+        if module is None:
             continue
-        for spec in imports:
-            dst = _resolve_import(rel, spec, import_index, python)
+        python = module.lang == "python"
+        for spec in extract.imports:
+            dst = _resolve_import(module.path, spec, import_index, python)
             if dst:
-                edges.append(Edge(src=src_id, dst=dst, kind=EdgeKind.IMPORT, weight=1.0))
+                edges.append(Edge(src=module.id, dst=dst, kind=EdgeKind.IMPORT, weight=1.0))
             else:
-                edges.append(Edge(src=src_id, dst=src_id, kind=EdgeKind.UNRESOLVED, weight=0.15))
+                edges.append(Edge(src=module.id, dst=module.id, kind=EdgeKind.UNRESOLVED, weight=0.15))
 
     openapi = load_openapi(root, show_file, sha)
     nodes, edges, contracts = link_contracts(nodes, edges, contracts, openapi)
-
     node_ids = [n.id for n in nodes]
     edge_keys = [f"{e.src}>{e.dst}:{e.kind}" for e in edges]
     return Snapshot(

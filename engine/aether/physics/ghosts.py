@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from aether.gates.guardloop import LoopOutcome, ScrubOutcome
 from aether.gates.tracelens import GhostTracer
 from aether.ir.models import Edge, EdgeKind, GhostResult, Node, NodeKind, Snapshot
 from aether.physics.metrics import _cycles, node_metrics, snapshot_graph
+from aether.physics.sandbox import write_ghost_artifact
+
+MAX_GHOST_PARALLEL = 16
+DEFAULT_GHOST_PARALLEL = 4
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,14 @@ CATALOG: list[GhostIntent] = [
     GhostIntent("add_index", "Add schema index", ("schema",), ("contract",)),
     GhostIntent("add_event_bus", "Add event bus", ("module",), ("schema",)),
 ]
+PHASE1_INTENTS = tuple(item.intent for item in CATALOG)
+CATALOG.extend(
+    [
+        GhostIntent("add_openapi_client", "Add OpenAPI client", ("contract",), ("schema",)),
+        GhostIntent("extract_service", "Extract a service", ("module",), ("schema",)),
+        GhostIntent("add_queue", "Add a queue", ("module",), ("schema",)),
+    ]
+)
 
 
 class GhostRunner(Protocol):
@@ -112,6 +127,7 @@ class AgentGhostRunner:
         budget: int = 50,
         session_name: str = "aether-ghost-lab",
         tracer: GhostTracer | None = None,
+        sandbox: Path | None = None,
     ):
         if budget < 1 or budget > 500:
             raise ValueError("ghost session budget must be between 1 and 500")
@@ -119,18 +135,22 @@ class AgentGhostRunner:
         self.budget = budget
         self.session_name = session_name
         self.tracer = tracer
+        self.sandbox = sandbox
         self.session_id = ""
         self.trace_id = ""
         self._halted = False
         self._halt_reason = ""
+        self._lock = threading.Lock()
 
     def run(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult:
         result = self._attach(snapshot, intent)
-        if self.gate is not None:
-            result = self._guard(result, intent)
-        if self.tracer is None:
-            return result
-        return self._trace(result)
+        result = self._materialize(result)
+        with self._lock:
+            if self.gate is not None:
+                result = self._guard(result, intent)
+            if self.tracer is not None:
+                result = self._trace(result)
+        return result
 
     def _attach(self, snapshot: Snapshot, intent: GhostIntent) -> GhostResult:
         before = (len(snapshot.nodes), len(snapshot.edges))
@@ -171,7 +191,11 @@ class AgentGhostRunner:
         else:
             verdict = "fail"
         where = target.export_name if target is not None and target.export_name else "a new module"
+        mutation = f"add module {ghost_id}"
+        if target is not None:
+            mutation += f" import {target.id}"
         assert (len(snapshot.nodes), len(snapshot.edges)) == before
+        note = f"Agent run: attached {intent.title} on {where}."
         return GhostResult(
             intent=intent.intent,
             title=intent.title,
@@ -181,8 +205,17 @@ class AgentGhostRunner:
             core_mass_hits=[where] if hot else [],
             new_cycles=new_cycles,
             contract_breaks=[],
-            note=f"Agent run: attached {intent.title} on {where}.",
+            note=note,
+            fail_reason=note if verdict == "fail" else "",
+            ir_only=True,
+            ir_mutation=mutation,
         )
+
+    def _materialize(self, result: GhostResult) -> GhostResult:
+        if self.sandbox is None:
+            return result
+        artifact = write_ghost_artifact(self.sandbox, result.intent)
+        return result.model_copy(update={"artifact_path": str(artifact)})
 
     def _guard(self, result: GhostResult, intent: GhostIntent) -> GhostResult:
         assert self.gate is not None
@@ -227,6 +260,7 @@ class AgentGhostRunner:
                 "core_mass_hits": [],
                 "session_id": self.session_id,
                 "budget": self.budget,
+                "fail_reason": f"Agent run: GuardLoop halted — {self._halt_reason}.",
             }
         )
 
@@ -248,6 +282,27 @@ def _attach_target(snapshot: Snapshot, intent: GhostIntent):
     return pool[0] if pool else None
 
 
-def run_ghost_lab(snapshot: Snapshot, runner: GhostRunner | None = None) -> list[GhostResult]:
+def parallel_width(parallel: int) -> int:
+    if parallel < 1 or parallel > MAX_GHOST_PARALLEL:
+        raise ValueError(f"parallel ghosts must be between 1 and {MAX_GHOST_PARALLEL}")
+    return parallel
+
+
+def disclose_parallel(parallel: int) -> str:
+    width = parallel_width(parallel)
+    noun = "ghost runs" if width == 1 else "ghosts run"
+    return f"{width} {noun} in parallel (hard max {MAX_GHOST_PARALLEL})."
+
+
+def run_ghost_lab(
+    snapshot: Snapshot,
+    runner: GhostRunner | None = None,
+    parallel: int = 1,
+) -> list[GhostResult]:
     chosen = runner or HeuristicGhostRunner()
-    return [chosen.run(snapshot, intent) for intent in CATALOG]
+    width = parallel_width(parallel)
+    if width == 1:
+        return [chosen.run(snapshot, intent) for intent in CATALOG]
+    with ThreadPoolExecutor(max_workers=width) as pool:
+        futures = [pool.submit(chosen.run, snapshot, intent) for intent in CATALOG]
+        return [future.result() for future in futures]

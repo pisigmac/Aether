@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -56,14 +57,82 @@ def list_source_paths(root: Path, sha: str | None = None) -> list[str]:
 
 def show_file(root: Path, rel_path: str, sha: str | None = None) -> str:
     if sha and is_git_repo(root):
-        try:
-            return _run_git(root, "show", f"{sha}:{rel_path}")
-        except subprocess.CalledProcessError:
-            return ""
+        found = batch_show_files(root, sha, [rel_path])
+        return found.get(rel_path, "")
     path = root / rel_path
     if not path.is_file():
         return ""
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def batch_show_files(root: Path, sha: str | None, paths: list[str]) -> dict[str, str]:
+    """Read many blobs in one git process. Missing paths are omitted."""
+    if not paths:
+        return {}
+    if sha and is_git_repo(root):
+        return _cat_file_batch(root, sha, paths)
+    found: dict[str, str] = {}
+    for rel in paths:
+        path = root / rel
+        if path.is_file():
+            found[rel] = path.read_text(encoding="utf-8", errors="ignore")
+    return found
+
+
+def diff_paths(root: Path, old_sha: str, new_sha: str) -> tuple[list[str], list[str]]:
+    """Net (touched, removed) paths between two commits, renames counted as delete plus add."""
+    out = _run_git(root, "diff", "--name-status", "--no-renames", "-z", old_sha, new_sha)
+    touched: list[str] = []
+    removed: list[str] = []
+    parts = out.split("\0")
+    i = 0
+    while i + 1 < len(parts):
+        status, path = parts[i], parts[i + 1]
+        i += 2
+        if not path:
+            continue
+        if status.startswith("D"):
+            removed.append(path)
+        else:
+            touched.append(path)
+    return touched, removed
+
+
+def _cat_file_batch(root: Path, sha: str, paths: list[str]) -> dict[str, str]:
+    proc = subprocess.Popen(
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
+    assert proc.stdin is not None and proc.stdout is not None
+
+    def _write() -> None:
+        assert proc.stdin is not None
+        proc.stdin.write("".join(f"{sha}:{path}\n" for path in paths).encode())
+        proc.stdin.close()
+
+    writer = threading.Thread(target=_write, daemon=True)
+    writer.start()
+    found: dict[str, str] = {}
+    for path in paths:
+        header = proc.stdout.readline()
+        if not header:
+            break
+        text = header.decode("utf-8", "replace").strip()
+        if text.endswith(" missing"):
+            continue
+        bits = text.split()
+        if len(bits) < 3:
+            continue
+        size = int(bits[-1])
+        blob = proc.stdout.read(size)
+        proc.stdout.read(1)
+        if bits[-2] != "blob":
+            continue
+        found[path] = blob.decode("utf-8", "replace")
+    writer.join()
+    proc.wait()
+    return found
 
 
 def commits_per_week(root: Path) -> float:
