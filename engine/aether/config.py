@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AETHER_", extra="ignore")
 
     data_dir: Path = Path("./data")
+    # Empty keeps universes in SQLite. A postgresql:// URL stores them in Postgres.
+    database_url: str = ""
     cors_origins: str = "http://localhost:3000"
     max_samples: int = 200
     max_snapshots: int = 200

@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import threading
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from aether.acquisition.git_ingest import IngestRequest
+from aether.auth.deps import require_principal
+from aether.auth.ownership import same_org
+from aether.auth.principal import Principal
+from aether.auth.routes import router as auth_router
 from aether.config import settings
 from aether.gates.guardloop import GuardLoopClient, GuardLoopError, GuardLoopGate
 from aether.gates.tracelens import TraceLensClient, TraceLensError, TraceLensTracer
 from aether.ir.models import ChangeSet, ForecastBundle, GhostRun
-from aether.jobs import IngestCancelled, store as job_store
+from aether.jobs import JobStore
+from aether.live import blank, forecast_reading, job_targets_repo, pick_universe_id
+from aether.worker import spawn as spawn_worker
 from aether.parsers.ids import stable_id
 from aether.physics.butterfly import apply_changeset
 from aether.physics.forecast import build_forecast, graph_slice
@@ -28,20 +34,35 @@ from aether.physics.ghosts import (
 from aether.physics.sandbox import open_sandbox
 from aether.physics.predictor import predictor_for_mode, resolve_predictor
 from aether.pipeline import attach_changeset, build_universe
-from aether.storage.db import AetherDB
+from aether.storage.db import AetherDB, open_database
 
 db: AetherDB | None = None
+job_store: JobStore | None = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global db
+    global db, job_store
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    db = AetherDB(settings.data_dir / "aether.db")
-    yield
+    db_path = settings.data_dir / "aether.db"
+    db = open_database(db_path)
+    job_store = JobStore(db_path)
+    worker = None
+    if os.environ.get("AETHER_INGEST_WORKER", "1") != "0":
+        worker = spawn_worker()
+    try:
+        yield
+    finally:
+        if worker is not None:
+            worker.terminate()
+            try:
+                worker.wait(timeout=5)
+            except Exception:
+                worker.kill()
 
 
 app = FastAPI(title="Aether Engine", version="0.1.0", lifespan=lifespan)
+app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins
@@ -57,6 +78,8 @@ class IngestBody(BaseModel):
     url: str = ""
     pr_ref: str = ""
     velocity_override: float | None = None
+    sample_policy: str = "even"
+    sample_every: int = Field(default=1, ge=1)
 
 
 class IngestResponse(BaseModel):
@@ -65,6 +88,7 @@ class IngestResponse(BaseModel):
     license: str
     snapshots: int
     velocity_commits_per_week: float
+    sample_policy: str = "even"
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -86,6 +110,17 @@ class JobStatus(BaseModel):
     label: str = ""
 
 
+def _ingest_request(body: IngestBody) -> IngestRequest:
+    return IngestRequest(
+        path=body.path,
+        url=body.url,
+        pr_ref=body.pr_ref,
+        velocity_override=body.velocity_override,
+        sample_policy=body.sample_policy,
+        sample_every=body.sample_every,
+    )
+
+
 def _db() -> AetherDB:
     if db is None:
         raise HTTPException(503, "database not ready")
@@ -99,35 +134,38 @@ def _to_ingest(universe, warnings: list[str]) -> IngestResponse:
         license=universe.license,
         snapshots=len(universe.snapshots),
         velocity_commits_per_week=universe.velocity_commits_per_week,
+        sample_policy=universe.sample_policy,
         warnings=warnings,
     )
 
 
-def _run_job(job_id: str, body: IngestBody) -> None:
-    job_store.update(job_id, 2, "Starting ingest")
+def _owned_universe(universe_id: str, principal: Principal | None):
+    universe = _db().get_universe(universe_id)
+    if universe is None or not same_org(principal, universe.org_id):
+        raise HTTPException(404, "universe not found")
+    return universe
 
-    def on_progress(percent: int, stage: str) -> None:
-        if job_store.is_cancelled(job_id):
-            raise IngestCancelled()
-        job_store.update(job_id, percent, stage)
 
-    try:
-        universe, warnings = build_universe(
-            IngestRequest(
-                path=body.path,
-                url=body.url,
-                pr_ref=body.pr_ref,
-                velocity_override=body.velocity_override,
-            ),
-            _db(),
-            on_progress=on_progress,
-        )
-        if not job_store.is_cancelled(job_id):
-            job_store.finish(job_id, _to_ingest(universe, warnings).model_dump())
-    except IngestCancelled:
-        job_store.cancel(job_id)
-    except Exception as exc:
-        job_store.fail(job_id, str(exc))
+def _summary(universe) -> dict:
+    return {
+        "id": universe.id,
+        "repo_path": universe.repo_path,
+        "license": universe.license,
+        "velocity": universe.velocity_commits_per_week,
+        "org_id": universe.org_id,
+    }
+
+
+def _actor(principal: Principal | None) -> str:
+    if principal is None:
+        return "local"
+    return principal.email or principal.sub or "local"
+
+
+def _jobs() -> JobStore:
+    if job_store is None:
+        raise HTTPException(503, "jobs not ready")
+    return job_store
 
 
 @app.get("/health")
@@ -136,25 +174,45 @@ def health() -> dict:
         "status": "ok",
         "service": "aether-engine",
         "data_dir": str(settings.data_dir),
+        "database": "postgres" if settings.database_url else "sqlite",
     }
 
 
 @app.get("/v1/universes")
-def list_universes() -> list[dict]:
-    return _db().list_universes()
+def list_universes(principal: Principal | None = Depends(require_principal)) -> list[dict]:
+    org_id = None if principal is None else principal.org_id
+    return _db().list_universes(org_id)
+
+
+@app.get("/v1/universes/{universe_id}")
+def get_universe(
+    universe_id: str,
+    principal: Principal | None = Depends(require_principal),
+) -> dict:
+    return _summary(_owned_universe(universe_id, principal))
+
+
+@app.delete("/v1/universes/{universe_id}", status_code=204)
+def delete_universe(
+    universe_id: str,
+    principal: Principal | None = Depends(require_principal),
+) -> Response:
+    _owned_universe(universe_id, principal)
+    _db().delete_universe(universe_id)
+    return Response(status_code=204)
 
 
 @app.post("/v1/universes", response_model=IngestResponse)
-def create_universe(body: IngestBody) -> IngestResponse:
+def create_universe(
+    body: IngestBody,
+    _principal: Principal | None = Depends(require_principal),
+) -> IngestResponse:
     try:
         universe, warnings = build_universe(
-            IngestRequest(
-                path=body.path,
-                url=body.url,
-                pr_ref=body.pr_ref,
-                velocity_override=body.velocity_override,
-            ),
+            _ingest_request(body),
             _db(),
+            org_id=_principal.org_id if _principal else "",
+            actor=_actor(_principal),
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -179,39 +237,109 @@ def _job_status(job) -> JobStatus:
     )
 
 
+def _owned_job(job_id: str, principal: Principal | None):
+    job = _jobs().get(job_id)
+    if job is None or not same_org(principal, job.org_id):
+        raise HTTPException(404, "job not found")
+    return job
+
+
 @app.post("/v1/jobs", response_model=JobAccepted)
-def start_ingest_job(body: IngestBody) -> JobAccepted:
-    job = job_store.create(label=body.path or body.url or "")
-    threading.Thread(target=_run_job, args=(job.id, body), daemon=True).start()
+def start_ingest_job(
+    body: IngestBody,
+    _principal: Principal | None = Depends(require_principal),
+) -> JobAccepted:
+    payload = body.model_dump()
+    payload["_actor"] = _actor(_principal)
+    job = _jobs().create(
+        label=body.path or body.url or "",
+        org_id=_principal.org_id if _principal else "",
+        request=payload,
+    )
     return JobAccepted(job_id=job.id, status="queued", percent=0, stage="queued")
 
 
+@app.get("/v1/audit")
+def list_audit(
+    limit: int = 50,
+    principal: Principal | None = Depends(require_principal),
+) -> list[dict]:
+    org_id = None if principal is None else principal.org_id
+    return _db().list_audit(org_id=org_id, limit=limit)
+
+
+@app.get("/v1/live")
+def live_reading(
+    repo: str = "",
+    principal: Principal | None = Depends(require_principal),
+) -> dict:
+    """One cell for the desktop bar. A running ingest hides pressure."""
+    if not repo.strip():
+        return blank("empty")
+    org_id = None if principal is None else principal.org_id
+    rows = [(row["id"], row["repo_path"]) for row in _db().list_universes(org_id)]
+    jobs = _jobs().list(limit=20, org_id=org_id)
+
+    def targets(job) -> bool:
+        result_path = ""
+        if job.result:
+            result_path = str(job.result.get("repo_path") or "")
+        return job_targets_repo(
+            job.label,
+            str(job.request.get("path") or ""),
+            result_path,
+            repo,
+        )
+
+    active = next((job for job in jobs if job.status in ("queued", "running") and targets(job)), None)
+    if active is not None:
+        return blank("ingesting", repo, percent=active.percent, stage=active.stage or "Queued")
+    universe_id = pick_universe_id(rows, repo)
+    if not universe_id:
+        failed = next((job for job in jobs if job.status == "error" and targets(job)), None)
+        if failed is not None:
+            return blank("error", repo, error=failed.error or failed.stage, stage=failed.stage)
+        return blank("missing", repo)
+    bundle = get_forecast(universe_id, principal=principal)
+    return forecast_reading(bundle)
+
+
 @app.get("/v1/jobs", response_model=list[JobStatus])
-def list_ingest_jobs(limit: int = 20) -> list[JobStatus]:
-    return [_job_status(job) for job in job_store.list(limit)]
+def list_ingest_jobs(
+    limit: int = 20,
+    principal: Principal | None = Depends(require_principal),
+) -> list[JobStatus]:
+    org_id = None if principal is None else principal.org_id
+    return [_job_status(job) for job in _jobs().list(limit, org_id=org_id)]
 
 
 @app.post("/v1/jobs/{job_id}/cancel", response_model=JobStatus)
-def cancel_ingest_job(job_id: str) -> JobStatus:
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    job_store.cancel(job_id)
-    updated = job_store.get(job_id)
+def cancel_ingest_job(
+    job_id: str,
+    _principal: Principal | None = Depends(require_principal),
+) -> JobStatus:
+    _owned_job(job_id, _principal)
+    _jobs().cancel(job_id)
+    updated = _jobs().get(job_id)
     assert updated is not None
     return _job_status(updated)
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatus)
-def get_ingest_job(job_id: str) -> JobStatus:
-    job = job_store.get(job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    return _job_status(job)
+def get_ingest_job(
+    job_id: str,
+    principal: Principal | None = Depends(require_principal),
+) -> JobStatus:
+    return _job_status(_owned_job(job_id, principal))
 
 
 @app.post("/v1/universes/{universe_id}/changesets", response_model=ChangeSet)
-def create_changeset(universe_id: str, body: ChangeSet) -> ChangeSet:
+def create_changeset(
+    universe_id: str,
+    body: ChangeSet,
+    _principal: Principal | None = Depends(require_principal),
+) -> ChangeSet:
+    _owned_universe(universe_id, _principal)
     body.universe_id = universe_id
     if not body.id:
         body.id = stable_id("changeset", universe_id, body.label)
@@ -233,11 +361,14 @@ def get_predictor() -> dict:
 
 
 @app.get("/v1/universes/{universe_id}/forecast", response_model=ForecastBundle)
-def get_forecast(universe_id: str, horizon_months: int = 24, mode: str = "auto") -> ForecastBundle:
+def get_forecast(
+    universe_id: str,
+    horizon_months: int = 24,
+    mode: str = "auto",
+    principal: Principal | None = Depends(require_principal),
+) -> ForecastBundle:
     store = _db()
-    universe = store.get_universe(universe_id)
-    if not universe:
-        raise HTTPException(404, "universe not found")
+    universe = _owned_universe(universe_id, principal)
     existing = store.get_forecast(universe_id)
     changesets = store.list_changesets(universe_id)
     changeset = changesets[-1] if changesets else None
@@ -268,14 +399,15 @@ def run_guarded_ghosts(
     parallel: int = Query(default=DEFAULT_GHOST_PARALLEL, ge=1, le=MAX_GHOST_PARALLEL),
     x_guardloop_key: Annotated[str | None, Header()] = None,
     x_tracelens_key: Annotated[str | None, Header()] = None,
+    _principal: Principal | None = Depends(require_principal),
 ) -> GhostRun:
+    universe = _owned_universe(universe_id, _principal)
     if not settings.guardloop_url:
         raise HTTPException(503, "GuardLoop URL is not configured")
     if settings.tracelens_url and not x_tracelens_key:
         raise HTTPException(401, "TraceLens token is required")
     store = _db()
-    universe = store.get_universe(universe_id)
-    if not universe or not universe.snapshots:
+    if not universe.snapshots:
         raise HTTPException(404, "universe not found")
     changesets = store.list_changesets(universe_id)
     changeset = changesets[-1] if changesets else None
@@ -310,9 +442,13 @@ def run_guarded_ghosts(
 
 
 @app.get("/v1/universes/{universe_id}/graph")
-def get_graph(universe_id: str, t: int = 0) -> dict:
-    universe = _db().get_universe(universe_id)
-    if not universe or not universe.snapshots:
+def get_graph(
+    universe_id: str,
+    t: int = 0,
+    principal: Principal | None = Depends(require_principal),
+) -> dict:
+    universe = _owned_universe(universe_id, principal)
+    if not universe.snapshots:
         raise HTTPException(404, "universe not found")
     idx = min(max(t, 0), len(universe.snapshots) - 1)
     return graph_slice(universe.snapshots[idx])

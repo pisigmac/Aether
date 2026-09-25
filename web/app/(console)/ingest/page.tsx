@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { cancelJob, fetchJobs, ingestRepo } from "@/lib/api";
+import {
+  cancelJob,
+  clearUniverseId,
+  deleteUniverse,
+  fetchAudit,
+  fetchJobs,
+  fetchUniverses,
+  type AuditRow,
+  getUniverseId,
+  ingestRepo,
+  type UniverseSummary,
+} from "@/lib/api";
 import { useForecast } from "@/components/ForecastProvider";
 import type { JobStatus } from "@/lib/types";
 
@@ -11,6 +22,8 @@ export default function IngestPage() {
   const [url, setUrl] = useState("");
   const [pr, setPr] = useState("");
   const [velocity, setVelocity] = useState("");
+  const [samplePolicy, setSamplePolicy] = useState("even");
+  const [sampleEvery, setSampleEvery] = useState("10");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [percent, setPercent] = useState(0);
@@ -18,6 +31,10 @@ export default function IngestPage() {
   const [jobs, setJobs] = useState<JobStatus[]>([]);
   const [jobsError, setJobsError] = useState("");
   const [jobId, setJobId] = useState("");
+  const [universes, setUniverses] = useState<UniverseSummary[]>([]);
+  const [universesError, setUniversesError] = useState("");
+  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [auditError, setAuditError] = useState("");
 
   const demos = [
     { name: "clsx", url: "https://github.com/lukeed/clsx" },
@@ -38,6 +55,8 @@ export default function IngestPage() {
           url: url || undefined,
           pr_ref: pr || undefined,
           velocity_override: velocity ? Number(velocity) : null,
+          sample_policy: samplePolicy,
+          sample_every: samplePolicy === "every" ? Number(sampleEvery) || 1 : 1,
         },
         (nextPercent, nextStage) => {
           setPercent(nextPercent);
@@ -50,9 +69,10 @@ export default function IngestPage() {
       setStage("Forecast ready");
       await reload();
       setStatus(
-        `Universe ${result.universe_id} · ${result.snapshots} snapshots · ${result.velocity_commits_per_week} commits/week`
+        `Universe ${result.universe_id} · ${result.snapshots} snapshots · ${result.sample_policy} · ${result.velocity_commits_per_week} commits/week`
       );
       void refreshJobs();
+      void refreshUniverses();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "ingest failed");
       void refreshJobs();
@@ -70,10 +90,45 @@ export default function IngestPage() {
     }
   }
 
+  async function refreshUniverses() {
+    try {
+      setUniverses(await fetchUniverses());
+      setUniversesError("");
+    } catch (err) {
+      setUniversesError(err instanceof Error ? err.message : "Could not load universes");
+    }
+  }
+
+  async function refreshAudit() {
+    try {
+      setAudit(await fetchAudit());
+      setAuditError("");
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : "Could not load the audit log");
+    }
+  }
+
+  async function onDelete(id: string) {
+    try {
+      await deleteUniverse(id);
+      if (getUniverseId() === id) {
+        clearUniverseId();
+        await reload();
+      }
+      await refreshUniverses();
+    } catch (err) {
+      setUniversesError(err instanceof Error ? err.message : "Could not delete universe");
+    }
+  }
+
   useEffect(() => {
     void refreshJobs();
+    void refreshUniverses();
+    void refreshAudit();
     const timer = window.setInterval(() => {
       void refreshJobs();
+      void refreshUniverses();
+      void refreshAudit();
     }, 2000);
     return () => window.clearInterval(timer);
   }, []);
@@ -114,6 +169,31 @@ export default function IngestPage() {
           onChange={(e) => setPr(e.target.value)}
         />
       </label>
+      <label className="block text-sm">
+        Snapshot sampling
+        <select
+          className="mt-1 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2"
+          value={samplePolicy}
+          onChange={(e) => setSamplePolicy(e.target.value)}
+        >
+          <option value="even">Even across history</option>
+          <option value="weekly">One commit per week</option>
+          <option value="every">Every Nth commit</option>
+          <option value="tag">Tags only</option>
+        </select>
+      </label>
+      {samplePolicy === "every" ? (
+        <label className="block text-sm">
+          N
+          <input
+            className="mt-1 w-full rounded-md border border-white/10 bg-black/30 px-3 py-2"
+            value={sampleEvery}
+            min={1}
+            type="number"
+            onChange={(e) => setSampleEvery(e.target.value)}
+          />
+        </label>
+      ) : null}
       <label className="block text-sm">
         Velocity override, commits/week
         <input
@@ -187,13 +267,68 @@ export default function IngestPage() {
     </form>
     <section className="card max-w-2xl space-y-3 p-6">
       <div>
+        <p className="font-mono text-xs uppercase tracking-widest text-sky-300/80">Universes</p>
+        <h2 className="text-lg">This org</h2>
+      </div>
+      {universesError ? (
+        <p className="text-sm text-rose-300">{universesError}</p>
+      ) : universes.length === 0 ? (
+        <p className="text-sm text-mist">No universes for this org yet.</p>
+      ) : (
+        <ol className="space-y-2">
+          {universes.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-white/10 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-xs text-sky-100">{row.repo_path}</p>
+                <p className="mt-1 truncate text-xs text-mist">{row.org_id || "local"} · {row.id}</p>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-lg border border-rose-300/40 px-3 py-1.5 text-xs text-rose-200"
+                onClick={() => {
+                  if (!window.confirm("Delete this universe?")) return;
+                  void onDelete(row.id);
+                }}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+    <section className="card max-w-2xl space-y-3 p-6">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-widest text-sky-300/80">Audit</p>
+        <h2 className="text-lg">Who ingested what</h2>
+      </div>
+      {auditError ? (
+        <p className="text-sm text-rose-300">{auditError}</p>
+      ) : audit.length === 0 ? (
+        <p className="text-sm text-mist">No ingests recorded yet.</p>
+      ) : (
+        <ol className="space-y-2">
+          {audit.map((row) => (
+            <li key={row.id} className="rounded-lg border border-white/10 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 font-mono text-xs">
+                <span className="truncate text-sky-100">{row.actor}</span>
+                <span className="shrink-0 text-mist">{row.decision} · {row.license}</span>
+              </div>
+              <p className="mt-1 truncate text-xs text-mist">{row.target}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+    <section className="card max-w-2xl space-y-3 p-6">
+      <div>
         <p className="font-mono text-xs uppercase tracking-widest text-sky-300/80">Jobs</p>
         <h2 className="text-lg">Recent ingests</h2>
       </div>
       {jobsError ? (
         <p className="text-sm text-rose-300">{jobsError}</p>
       ) : jobs.length === 0 ? (
-        <p className="text-sm text-mist">No jobs in this engine process yet.</p>
+        <p className="text-sm text-mist">No ingest jobs yet.</p>
       ) : (
         <ol className="space-y-2">
           {jobs.map((job) => (

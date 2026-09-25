@@ -38,7 +38,7 @@ class Aether:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:18100",
         *,
         timeout: float = 60.0,
         headers: dict[str, str] | None = None,
@@ -160,7 +160,7 @@ class AsyncAether:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:18100",
         *,
         timeout: float = 60.0,
         headers: dict[str, str] | None = None,

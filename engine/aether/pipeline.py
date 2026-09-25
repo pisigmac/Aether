@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from aether.acquisition.git_ingest import IngestRequest, ingest_repo
+from aether.acquisition.licenses import LicenseRejected, license_allowed
 from aether.acquisition.sampler import show_file
 from aether.ir.models import ChangeSet, Mutation, Node, NodeKind, Universe
 from aether.parsers.ids import schema_id, stable_id
@@ -19,9 +20,22 @@ def build_universe(
     db: AetherDB,
     on_progress: ProgressFn | None = None,
     data_dir: Path | None = None,
+    org_id: str = "",
+    actor: str = "",
 ) -> tuple[Universe, list[str]]:
     report = on_progress or (lambda _pct, _stage: None)
-    ingested = ingest_repo(req, data_dir=data_dir, on_progress=report)
+    target = req.url or req.path
+    try:
+        ingested = ingest_repo(req, data_dir=data_dir, on_progress=report)
+    except LicenseRejected as exc:
+        db.append_audit(
+            actor=actor,
+            org_id=org_id,
+            target=target,
+            license_id=exc.spdx,
+            decision="rejected",
+        )
+        raise
     universe_id = stable_id("universe", str(ingested.root))
     total = max(len(ingested.samples), 1)
 
@@ -36,6 +50,9 @@ def build_universe(
         license=ingested.license,
         snapshots=snapshots,
         velocity_commits_per_week=ingested.velocity,
+        sample_policy=req.sample_policy or "even",
+        sample_every=req.sample_every,
+        org_id=org_id,
     )
     report(78, "Writing universe")
     db.upsert_universe(universe)
@@ -64,6 +81,17 @@ def build_universe(
     report(90, "Running physics forecast")
     db.upsert_forecast(bundle)
     report(100, "Forecast ready")
+    decision = "unknown" if ingested.license == "UNKNOWN" else "allowed"
+    if ingested.license != "UNKNOWN" and not license_allowed(ingested.license):
+        decision = "rejected"
+    db.append_audit(
+        actor=actor,
+        org_id=org_id,
+        target=target,
+        license_id=ingested.license,
+        decision=decision,
+        universe_id=universe.id,
+    )
     return universe, ingested.warnings
 
 

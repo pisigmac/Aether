@@ -8,7 +8,7 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-38bdf8.svg)](LICENSE)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI-009688.svg?logo=fastapi)](engine)
 [![Next.js](https://img.shields.io/badge/Dashboard-Next.js-000000.svg?logo=next.js)](web)
-[![Python](https://img.shields.io/badge/Languages-Python%20%2B%20TypeScript-3776AB.svg)](engine/aether/ir)
+[![Python](https://img.shields.io/badge/Languages-Python%20%2B%20TypeScript%20%2B%20Go%20%2B%20Java-3776AB.svg)](engine/aether/ir)
 
 [Why](#why-aether) · [Weather](#how-to-read-the-weather) · [Showcase](#showcase) · [SDK](#python-sdk) · [Quick start](#quick-start) · [API](#engine-api)
 
@@ -50,6 +50,8 @@ Radar is a weather map, not an architecture hairball. Cells are sized by mass an
 | **Watch** | P 0.6–1.2 | Debt is forming — coupling, churn, or a leaky contract. Eight months out it becomes a bottleneck. | Add pagination, indexes, or tests before the next agent wave. Open Butterfly on the cell. |
 | **High-pressure** | P ≥ 1.2 | A core module or schema will fail the next feature cycle. Cost and collisions climb together. | Split the god module, fix the contract, or block the schema change. Do not pile more agents here. |
 | **Storm** | collision | Two change vectors share a contract — typically schema → API → frontend. | Scrub to +8 months, then open Butterfly and cut that path. |
+
+The live bar is a strip you install across the top of the desktop. The IDE plugin writes the repo in the focused window, and the strip follows it: path, band, and pressure at +8 months, or the ingest percent and stage while that repo is still parsing. [Live bar](docs/live-bar.md).
 
 ## Showcase
 
@@ -129,7 +131,7 @@ curl -sS -X POST http://localhost:8000/v1/jobs \
 Point Aether at a local path or a public `https` / `git` URL on GitHub, GitLab, Bitbucket, or Codeberg.
 
 - Licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause
-- Languages: Python and TypeScript / JavaScript
+- Languages: Python, TypeScript / JavaScript, Go, and Java
 - Live progress while history is sampled and the forecast is built
 - Public history via documented archives — no scraping
 
@@ -145,7 +147,7 @@ pip install kaether
 ```python
 from aether_sdk import Aether
 
-with Aether("http://127.0.0.1:8000") as aether:
+with Aether("http://127.0.0.1:18100") as aether:
     ingest = aether.ingest(
         url="https://github.com/expressjs/express",
         on_progress=lambda pct, stage: print(f"{pct}% {stage}"),
@@ -205,6 +207,8 @@ If ports `8000` / `3000` are taken:
 uvicorn aether.api:app --reload --port 18100
 NEXT_PUBLIC_AETHER_API=http://127.0.0.1:18100 npm run dev -- -p 13100
 ```
+
+Leave `AETHER_DATABASE_URL` empty and universes, evolution, and forecasts stay in SQLite under the data directory. Set it to a `postgresql://` URL to store those in Postgres. Ingest jobs stay in the SQLite file either way.
 
 Or: `docker compose up --build`
 

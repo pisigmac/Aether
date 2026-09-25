@@ -126,11 +126,6 @@ def detect_patterns(snapshot: Snapshot) -> list[str]:
     if len(http_edges) >= 6:
         labels.add("chatty_rpc")
 
-    schema_nodes = [n for n in snapshot.nodes if n.kind == NodeKind.SCHEMA]
-    if schema_nodes:
-        # fixture and typical ORM models often omit indexes
-        labels.add("missing_index")
-
     return sorted(labels)
 
 

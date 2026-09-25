@@ -227,7 +227,7 @@ export default function LandingPage() {
             </div>
             <InstallBox command={`curl -fsSL ${siteUrl}/install.sh | bash`} />
             <p className="mt-6 max-w-xl font-mono text-xs leading-relaxed text-[#b7aa93]">
-              Python and TypeScript. MIT, Apache-2.0, and BSD. Public git history only. Unresolved edges stay fog — Aether does not invent certainty.
+              Python, TypeScript, Go, and Java. MIT, Apache-2.0, and BSD. Public git history only. Unresolved edges stay fog — Aether does not invent certainty.
             </p>
           </div>
           <Barometer />

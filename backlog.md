@@ -128,13 +128,13 @@ Shipped 2026-09-22. Closed here so later phases can point at seams.
 
 | ID | Pri | Status | Item | Acceptance | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P4-01 | P0 | later | IR contract test harness | Golden fixtures: Python / TS / (new lang) emit comparable nodes for the same toy app. | Prevents parser drift. |
-| P4-02 | P0 | later | Third language parser (Go *or* Java — pick one) | Tree-sitter (or official) → IR only. | Prefer the language Aether users ingest most. |
-| P4-03 | P1 | later | Fourth language | Same harness. | |
-| P4-04 | P0 | later | OpenAPI-first contract linker | If `openapi.json` exists, frontend fetch paths bind to it with high confidence. Name-matching is fallback. Unresolved stays `unresolved`. | [`engine/aether/parsers/contracts.py`](engine/aether/parsers/contracts.py) |
-| P4-05 | P1 | later | SQL / Prisma / SQLAlchemy index detection | `missing_index` is evidence-based, not “schema exists ⇒ missing”. | |
-| P4-06 | P1 | later | Graph performance budget | Publish p95 for diffusion on 10k / 50k nodes. Rust kernel only if Python + networkx misses the budget. | Phase 1 note already said this. |
-| P4-07 | P2 | later | Snapshot sampling policies | Weekly / every-Nth / tag-only, configurable per universe. | |
+| P4-01 | P0 | done | IR contract test harness | Golden fixtures: Python / TS / (new lang) emit comparable nodes for the same toy app. | Python, TypeScript, Go, and Java `fixtures/ir-contract` each emit module, symbol, and HTTP `/orders` with the same contract id. |
+| P4-02 | P0 | done | Third language parser (Go *or* Java — pick one) | Tree-sitter (or official) → IR only. | Go. `net/http` HandleFunc and Gin/chi verbs become HTTP contracts. Java stays the fourth-language candidate. |
+| P4-03 | P1 | done | Fourth language | Same harness. | Java. Spring mappings and JAX-RS `@Path` become HTTP contracts. A class `@RequestMapping` prefixes the method path. |
+| P4-04 | P0 | done | OpenAPI-first contract linker | If `openapi.json` exists, frontend fetch paths bind to it with high confidence. Name-matching is fallback. Unresolved stays `unresolved`. | Spec paths, including `/orders/{id}`, bind at weight 3.0. Exact Python name match stays 2.5 when the spec misses the fetch. |
+| P4-05 | P1 | done | SQL / Prisma / SQLAlchemy index detection | `missing_index` is evidence-based, not “schema exists ⇒ missing”. | A lookup, foreign key, or Prisma relation with no covering index sets the flag. A table with no lookup does not. |
+| P4-06 | P1 | done | Graph performance budget | Publish p95 for diffusion on 10k / 50k nodes. Rust kernel only if Python + networkx misses the budget. | Bars 250 ms / 800 ms. Adjacency-list p95 is 79.9 ms / 398.1 ms. NetworkX missed. No Rust kernel. [`docs/diffusion-budget.md`](docs/diffusion-budget.md) |
+| P4-07 | P2 | done | Snapshot sampling policies | Weekly / every-Nth / tag-only, configurable per universe. | Default stays even. Weekly keeps the newest commit in each ISO week. Every Nth keeps the tip. Tags with none in the window fall back to HEAD. Stored on the universe. |
 | P4-08 | P2 | later | IR v2 (only if forced) | Additive fields first. Bump `ir_version`. Old bundles still load. | Avoid a rewrite. |
 
 ---
@@ -147,11 +147,11 @@ Shipped 2026-09-22. Closed here so later phases can point at seams.
 
 | ID | Pri | Status | Item | Acceptance | Notes |
 | --- | --- | --- | --- | --- | --- |
-| P5-01 | P0 | later | OpenDesk (or suite) SSO | Login, org, JWT. Engine rejects unauthenticated mutating routes. | Call as service. Do not invent a password scheme. |
-| P5-02 | P0 | later | Universe ownership | List / get / delete scoped to org. | |
-| P5-03 | P0 | later | Hosted ingest workers | Clone and parse off the API process. Jobs survive process restart (Redis or DB, not in-memory only). | Replaces [`engine/aether/jobs.py`](engine/aether/jobs.py) process memory. |
-| P5-04 | P1 | later | Postgres for universes / evolution / forecasts | SQLite remains an embedded/dev option. | |
-| P5-05 | P1 | later | Audit log | Who ingested which URL/path, when, license decision. | |
+| P5-01 | P0 | done | OpenDesk (or suite) SSO | Login, org, JWT. Engine rejects unauthenticated mutating routes. | Dashboard posts the password to OpenDesk. Engine verifies RS256 via JWKS when `AETHER_AUTH_JWKS_URL` is set. Audience `aether`. Local ingest stays open until that URL is set. |
+| P5-02 | P0 | done | Universe ownership | List / get / delete scoped to org. | Universes store `org_id`. With OpenDesk on, list, get, delete, forecast, and graph only see that org. Another org's id is 404. With OpenDesk off, local list and delete stay open. |
+| P5-03 | P0 | done | Hosted ingest workers | Clone and parse off the API process. Jobs survive process restart (Redis or DB, not in-memory only). | Jobs are rows in SQLite. The API only enqueues. A worker process clones and parses. A dead worker's job is queued again. `aether worker` runs the loop on its own when `AETHER_INGEST_WORKER=0`. |
+| P5-04 | P1 | done | Postgres for universes / evolution / forecasts | SQLite remains an embedded/dev option. | Empty `AETHER_DATABASE_URL` keeps SQLite. A `postgresql://` URL stores universes, snapshots, evolution, changesets, and forecasts in Postgres. Ingest jobs stay in the SQLite file. |
+| P5-05 | P1 | done | Audit log | Who ingested which URL/path, when, license decision. | Each ingest writes actor, org, target, time, license, and decision (`allowed`, `unknown`, or `rejected`). `GET /v1/audit` follows the org when OpenDesk is on. The ingest page lists it. |
 | P5-06 | P2 | later | Billing hook | Meter universes and ghost-minutes. Do not build a ledger — use existing billing if the suite has one. | After SSO. |
 | P5-07 | P1 | later | GitHub App / PR comment | Bot posts +8 month narrative + Radar link on a PR. | The original “feed Aether a PR” surface. |
 | P5-08 | P2 | later | IDE / Cursor mention | Thin client: open Radar for current repo. Dashboard stays the system of record. | |
@@ -204,3 +204,15 @@ Always allowed, any phase, if they do not skip phase exits.
 | --- | --- |
 | 2026-09-23 | Backlog created. Phase 1 closed. Phase 2 is the next workstream. |
 | 2026-09-23 | Phase 2 P0 in progress on `dev`: GH Archive + SWH adapters, corpus manifest, export/train CLI, linear predictor, Radar source badge. |
+| 2026-09-24 | P4-01 done. IR contract harness compares Python and TypeScript on the orders toy. |
+| 2026-09-25 | P4-02 done. Go parser emits modules, symbols, and HTTP contracts. The orders harness includes Go. |
+| 2026-09-25 | P4-04 done. Frontend fetches bind to `openapi.json` first. Name match remains the fallback. |
+| 2026-09-25 | P4-03 done. Java parser emits modules, symbols, and HTTP contracts. The orders harness includes Java. |
+| 2026-09-25 | P4-05 done. `missing_index` follows an unindexed lookup. A schema node alone no longer sets it. |
+| 2026-09-25 | P4-06 done. Diffusion p95 published for 10k and 50k. Python meets the bar. No Rust kernel. |
+| 2026-09-25 | P4-07 done. Ingest can sample weekly, every Nth commit, or tags. The choice is stored on the universe. |
+| 2026-09-25 | P5-01 done. Sign-in is OpenDesk. Mutating routes require that JWT when JWKS is configured. |
+| 2026-09-25 | P5-02 done. Universes belong to an org. List, get, and delete follow that org when OpenDesk is on. |
+| 2026-09-25 | P5-03 done. Ingest jobs are stored in SQLite and run in a worker process. A restart keeps the queue. |
+| 2026-09-25 | P5-04 done. Universes, evolution, and forecasts can live in Postgres. SQLite stays the default. |
+| 2026-09-25 | P5-05 done. Ingests are audited with actor, target, time, and license decision. |

@@ -151,11 +151,21 @@ def commits_per_week(root: Path) -> float:
     return round(len(stamps) / weeks, 3)
 
 
+SAMPLE_POLICIES = ("even", "weekly", "every", "tag")
+
+
 def sample_commits(
     root: Path,
     max_samples: int | None = None,
     lookback_months: int | None = None,
+    policy: str = "even",
+    every: int = 1,
+    warnings: list[str] | None = None,
 ) -> list[SampleCommit]:
+    if policy not in SAMPLE_POLICIES:
+        raise ValueError(f"sample_policy must be one of {', '.join(SAMPLE_POLICIES)}")
+    if policy == "every" and every < 1:
+        raise ValueError("sample_every must be >= 1")
     cap = max_samples or settings.max_samples
     months = lookback_months or settings.lookback_months
     if not is_git_repo(root):
@@ -179,12 +189,65 @@ def sample_commits(
         stamp = _run_git(root, "log", "-1", "--format=%cI").strip()
         return [SampleCommit(sha=sha, authored_at=stamp)]
 
-    # newest-first from git log; keep HEAD, then evenly sample older history
+    if policy == "weekly":
+        selected = _weekly(rows)
+    elif policy == "every":
+        selected = [row for index, row in enumerate(rows) if index % every == 0]
+    elif policy == "tag":
+        selected = _tagged(root, cutoff)
+        if not selected:
+            if warnings is not None:
+                warnings.append("No tags in the lookback window; sampling HEAD only.")
+            selected = [rows[0]]
+    else:
+        selected = rows
+
+    # newest-first; keep the newest pick, then evenly sample if still over the cap
+    return list(reversed(_cap_newest_first(selected, cap)))
+
+
+def _weekly(rows: list[SampleCommit]) -> list[SampleCommit]:
+    seen: set[tuple[int, int]] = set()
+    picked: list[SampleCommit] = []
+    for row in rows:
+        when = _parse_iso(row.authored_at)
+        key = (when.isocalendar().year, when.isocalendar().week)
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(row)
+    return picked
+
+
+def _tagged(root: Path, cutoff: datetime) -> list[SampleCommit]:
+    fmt = (
+        "%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end) "
+        "%(if)%(*committerdate:iso-strict)%(then)%(*committerdate:iso-strict)"
+        "%(else)%(committerdate:iso-strict)%(end)"
+    )
+    out = _run_git(root, "for-each-ref", "refs/tags", f"--format={fmt}")
+    picked: list[SampleCommit] = []
+    seen: set[str] = set()
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        sha, stamp = line.split(" ", 1)
+        if sha in seen:
+            continue
+        authored = _parse_iso(stamp.strip())
+        if authored < cutoff:
+            continue
+        seen.add(sha)
+        picked.append(SampleCommit(sha=sha, authored_at=authored.isoformat()))
+    picked.sort(key=lambda row: row.authored_at, reverse=True)
+    return picked
+
+
+def _cap_newest_first(rows: list[SampleCommit], cap: int) -> list[SampleCommit]:
     if len(rows) <= cap:
-        return list(reversed(rows))
+        return list(rows)
     if cap <= 1:
         return [rows[0]]
-
     head, rest = rows[0], rows[1:]
     step = max(len(rest) / (cap - 1), 1.0)
     picked = [head]
@@ -194,7 +257,7 @@ def sample_commits(
         if candidate.sha != picked[-1].sha:
             picked.append(candidate)
         idx += step
-    return list(reversed(picked))
+    return picked
 
 
 def _parse_iso(value: str) -> datetime:

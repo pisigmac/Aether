@@ -21,5 +21,6 @@ datasets/**/*.parquet
 web/.env.local
 .DS_Store
 *.log
+*.vsix
 .cursor/
 fixtures/polyglot-debt/.git/

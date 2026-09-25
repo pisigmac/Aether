@@ -25,6 +25,12 @@ def test_ingest_fixture(tmp_path: Path):
     assert any("Parsing snapshot" in stage for _pct, stage in marks)
     assert universe.snapshots
     assert universe.license == "MIT"
+    audit = db.list_audit()
+    assert audit[0]["decision"] == "allowed"
+    assert audit[0]["license"] == "MIT"
+    assert audit[0]["actor"] == "local"
+    assert audit[0]["target"] == str(FIXTURE)
+    assert audit[0]["universe_id"] == universe.id
     forecast = db.get_forecast(universe.id)
     assert forecast is not None
     assert forecast.ghosts

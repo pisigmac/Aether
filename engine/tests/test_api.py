@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from aether.api import app
 from aether.config import settings
-from aether.jobs import store as job_store
+from aether import api as api_mod
 from aether.ir.models import ChangeSet, Mutation, Node, NodeKind, Universe
 from aether.physics.predictor import train_linear
 from aether.storage.db import AetherDB
@@ -96,19 +96,17 @@ def test_forecast_learned_mode_same_changeset(tmp_path, monkeypatch):
 
 def test_list_jobs_endpoint(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    job_store.clear()
-    try:
-        job = job_store.create(label="../fixtures/polyglot-debt")
-        job_store.update(job.id, 40, "Parsing snapshot 1/4")
-        with TestClient(app) as client:
-            rows = client.get("/v1/jobs").json()
-            found = next(row for row in rows if row["job_id"] == job.id)
-            assert found["percent"] == 40
-            assert found["stage"] == "Parsing snapshot 1/4"
-            assert found["label"] == "../fixtures/polyglot-debt"
-            assert found["created_at"]
-            one = client.get(f"/v1/jobs/{job.id}")
-            assert one.status_code == 200
-            assert one.json()["job_id"] == job.id
-    finally:
-        job_store.clear()
+    with TestClient(app) as client:
+        assert api_mod.job_store is not None
+        api_mod.job_store.clear()
+        job = api_mod.job_store.create(label="../fixtures/polyglot-debt")
+        api_mod.job_store.update(job.id, 40, "Parsing snapshot 1/4")
+        rows = client.get("/v1/jobs").json()
+        found = next(row for row in rows if row["job_id"] == job.id)
+        assert found["percent"] == 40
+        assert found["stage"] == "Parsing snapshot 1/4"
+        assert found["label"] == "../fixtures/polyglot-debt"
+        assert found["created_at"]
+        one = client.get(f"/v1/jobs/{job.id}")
+        assert one.status_code == 200
+        assert one.json()["job_id"] == job.id

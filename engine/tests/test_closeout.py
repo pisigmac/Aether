@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from aether.acquisition.git_ingest import IngestRequest, clone_percent, ingest_repo
 from aether.api import app
 from aether.config import settings
-from aether.jobs import store as job_store
+from aether import api as api_mod
 from aether.physics.time_machine import build_timeline, narrative_from_labels, pressure_band
 from tests.test_physics import _snap
 
@@ -73,23 +73,21 @@ def test_heuristic_timeline_pressure_unchanged_and_banded():
 
 def test_cancel_job_sticks(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    job_store.clear()
-    try:
-        job = job_store.create(label="demo")
-        job_store.update(job.id, 12, "Cloning repository")
-        with TestClient(app) as client:
-            cancelled = client.post(f"/v1/jobs/{job.id}/cancel")
-            assert cancelled.status_code == 200
-            assert cancelled.json()["status"] == "cancelled"
-            assert cancelled.json()["stage"] == "cancelled"
-        job_store.update(job.id, 80, "Parsing snapshot")
-        job_store.finish(job.id, {"universe_id": "nope"})
-        stuck = job_store.get(job.id)
+    with TestClient(app) as client:
+        assert api_mod.job_store is not None
+        store = api_mod.job_store
+        store.clear()
+        job = store.create(label="demo")
+        store.update(job.id, 12, "Cloning repository")
+        cancelled = client.post(f"/v1/jobs/{job.id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        assert cancelled.json()["stage"] == "cancelled"
+        store.update(job.id, 80, "Parsing snapshot")
+        store.finish(job.id, {"universe_id": "nope"})
+        stuck = store.get(job.id)
         assert stuck is not None
         assert stuck.status == "cancelled"
         assert stuck.percent == 12
-        with TestClient(app) as client:
-            missing = client.post("/v1/jobs/missing/cancel")
+        missing = client.post("/v1/jobs/missing/cancel")
         assert missing.status_code == 404
-    finally:
-        job_store.clear()

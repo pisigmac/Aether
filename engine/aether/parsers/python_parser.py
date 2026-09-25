@@ -29,6 +29,9 @@ def parse_python(path: str, source: str) -> PyExtract:
     if extract is None:
         extract = _parse_ast(path, source)
     _augment_with_regex(path, source, extract)
+    from aether.parsers.indexes import apply_sqlalchemy
+
+    apply_sqlalchemy(source, extract)
     return extract
 
 

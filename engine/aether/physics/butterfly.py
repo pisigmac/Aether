@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections import defaultdict, deque
 
 from aether.ir.models import ButterflyFrame, ChangeSet, EdgeKind, ImpactedNode, NodeKind, Snapshot
-from aether.physics.metrics import snapshot_graph
+
+# One Butterfly horizon, sparse graph (3 outgoing edges per node).
+# NetworkX graph build missed both bars (about 300 ms at 10k, 1.2 s at 50k).
+DIFFUSION_BUDGET_MS = {10_000: 250, 50_000: 800}
 
 
 def apply_changeset(snapshot: Snapshot, changeset: ChangeSet | None) -> Snapshot:
@@ -49,11 +52,11 @@ def origins_from_changeset(snapshot: Snapshot, changeset: ChangeSet | None) -> l
 
 
 def propagate(snapshot: Snapshot, origins: list[str], months: float) -> ButterflyFrame:
-    g = snapshot_graph(snapshot)
+    outs, meta = _adjacency(snapshot)
     intensity: dict[str, float] = defaultdict(float)
     path_type: dict[str, str] = {}
     for origin in origins:
-        if origin not in g:
+        if origin not in meta:
             continue
         intensity[origin] = max(intensity[origin], 1.0)
         path_type[origin] = "origin"
@@ -61,11 +64,9 @@ def propagate(snapshot: Snapshot, origins: list[str], months: float) -> Butterfl
         seen = {origin}
         while queue:
             node, depth, seed = queue.popleft()
-            for _, dst, data in g.out_edges(node, data=True):
+            for dst, kind, weight in outs.get(node, ()):
                 if dst in seen:
                     continue
-                kind = data.get("kind", "")
-                weight = float(data.get("weight", 1.0))
                 decay = 0.72 ** depth
                 time_boost = 1.0 + months / 24.0
                 nxt = seed * decay * min(weight, 3.0) / 2.0 * time_boost
@@ -73,7 +74,7 @@ def propagate(snapshot: Snapshot, origins: list[str], months: float) -> Butterfl
                     continue
                 seen.add(dst)
                 intensity[dst] = max(intensity[dst], nxt)
-                path_type[dst] = _path_type(kind, g.nodes[dst] if dst in g else {})
+                path_type[dst] = _path_type(kind, meta.get(dst, {}))
                 queue.append((dst, depth + 1, nxt))
 
     labels = {n.id: (n.export_name or n.path or n.id) for n in snapshot.nodes}
@@ -90,6 +91,28 @@ def propagate(snapshot: Snapshot, origins: list[str], months: float) -> Butterfl
     ]
     impacted.sort(key=lambda x: x.intensity, reverse=True)
     return ButterflyFrame(months=months, origin_ids=origins, impacted=impacted[:40])
+
+
+def _adjacency(snapshot: Snapshot) -> tuple[dict[str, list[tuple[str, str, float]]], dict[str, dict]]:
+    outs: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    meta: dict[str, dict] = {
+        node.id: {"kind": node.kind.value, "lang": node.lang} for node in snapshot.nodes
+    }
+    unresolved = EdgeKind.UNRESOLVED
+    for edge in snapshot.edges:
+        src = edge.src
+        dst = edge.dst
+        kind = edge.kind
+        if src == dst and kind == unresolved:
+            if src not in meta:
+                meta[src] = {}
+            continue
+        if src not in meta:
+            meta[src] = {}
+        if dst not in meta:
+            meta[dst] = {}
+        outs[src].append((dst, kind.value, edge.weight))
+    return outs, meta
 
 
 def _path_type(edge_kind: str, node_data: dict) -> str:

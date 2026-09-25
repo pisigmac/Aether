@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from aether.acquisition.licenses import detect_license, license_allowed
+from aether.acquisition.licenses import LicenseRejected, detect_license, license_allowed
 from aether.acquisition.sampler import (
     SampleCommit,
     commits_per_week,
@@ -32,6 +32,8 @@ class IngestRequest:
     velocity_override: float | None = None
     lookback_months: int | None = None
     max_samples: int | None = None
+    sample_policy: str = "even"
+    sample_every: int = 1
 
 
 @dataclass
@@ -57,10 +59,7 @@ def ingest_repo(
     if license_id == "UNKNOWN":
         warnings.append("No recognized LICENSE file; proceeding as local working tree.")
     elif not license_allowed(license_id):
-        raise PermissionError(
-            f"License {license_id} is outside the allowlist "
-            f"({', '.join(sorted(settings.allowed_licenses))})."
-        )
+        raise LicenseRejected(license_id)
 
     report(18, "Sampling git history")
     snap_cap = req.max_samples or settings.max_samples
@@ -70,6 +69,9 @@ def ingest_repo(
         root,
         max_samples=snap_cap,
         lookback_months=req.lookback_months,
+        policy=req.sample_policy or "even",
+        every=req.sample_every,
+        warnings=warnings,
     )
     _enforce_caps(root, samples, warnings)
     velocity = req.velocity_override if req.velocity_override else commits_per_week(root)

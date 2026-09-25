@@ -1,12 +1,12 @@
 [project]
 name = "kaether"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python SDK for the Aether software physics engine"
 requires-python = ">=3.10"
 authors = [
     { name = "Vikas Budde", email = "vikas.budde@hotmail.com" },
 ]
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
     "httpx>=0.27.0",
     "pydantic>=2.9.0",
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

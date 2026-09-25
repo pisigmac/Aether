@@ -36,6 +36,7 @@ def test_patterns_and_metrics():
     labels = detect_patterns(snap)
     assert "unbounded_list" in labels
     assert "schema_leak" in labels
+    assert "missing_index" not in labels
     cells = node_metrics(snap)
     assert cells
     assert all(c.mass >= 0 for c in cells)

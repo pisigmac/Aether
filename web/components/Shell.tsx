@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CloudRain, GitGraph, Ghost, DollarSign, UploadCloud } from "lucide-react";
 import { useForecast } from "@/components/ForecastProvider";
+import { AuthStatus } from "@/components/AuthStatus";
+import { LiveBar } from "@/components/LiveBar";
 import { AetherLogo, HomeLink } from "@/components/Logo";
 
 const LINKS = [
@@ -52,6 +54,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
             )}
+          <AuthStatus />
           <nav className="flex gap-1">
             <HomeLink
               className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
@@ -80,7 +83,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-6xl px-6 py-8 pb-40">{children}</main>
+      <LiveBar />
     </div>
   );
 }

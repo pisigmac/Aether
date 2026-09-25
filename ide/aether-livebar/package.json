@@ -1,0 +1,21 @@
+{
+  "name": "aether-livebar",
+  "displayName": "Aether Live Bar",
+  "description": "Points the desktop live bar at the repo open in this window.",
+  "version": "0.1.0",
+  "publisher": "aether",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aether.livebar.show",
+        "title": "Aether: Show desktop live bar"
+      }
+    ]
+  }
+}

@@ -105,6 +105,7 @@ export type IngestResponse = {
   license: string;
   snapshots: number;
   velocity_commits_per_week: number;
+  sample_policy: string;
   warnings: string[];
 };
 

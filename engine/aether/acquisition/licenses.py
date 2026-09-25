@@ -45,6 +45,13 @@ def detect_license(root: Path) -> str:
     return "UNKNOWN"
 
 
+class LicenseRejected(PermissionError):
+    def __init__(self, spdx: str) -> None:
+        self.spdx = spdx
+        allowed = ", ".join(sorted(settings.allowed_licenses))
+        super().__init__(f"License {spdx} is outside the allowlist ({allowed}).")
+
+
 def license_allowed(spdx: str, allowlist: set[str] | None = None) -> bool:
     allowed = allowlist or settings.allowed_licenses
     return spdx in allowed

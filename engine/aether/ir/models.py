@@ -69,6 +69,9 @@ class Universe(BaseModel):
     license: str = ""
     snapshots: list[Snapshot] = Field(default_factory=list)
     velocity_commits_per_week: float = 1.0
+    sample_policy: str = "even"
+    sample_every: int = 1
+    org_id: str = ""
 
 
 class Mutation(BaseModel):
